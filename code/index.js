@@ -1,7 +1,7 @@
 const OWNER = "SegoCode";
 const CARDS = 4;
 const CACHE = "public, max-age=3600";
-const WIDTH = 340;
+const WIDTH = 425;
 const CARD_H = 48;
 const SVG_H = 4 + CARDS * CARD_H;
 const GH = {
