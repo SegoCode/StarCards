@@ -72,6 +72,7 @@ async function watchEvents(repository: GitHubRepository): Promise<Star[]> {
 async function githubJson(path: string): Promise<unknown> {
     const response = await fetch(`https://api.github.com${path}`, {
         headers: GITHUB_HEADERS,
+        cf: { cacheTtl: 3600, cacheEverything: true },
     });
     if (!response.ok) {
         throw new Error(`GitHub API returned ${response.status}`);
