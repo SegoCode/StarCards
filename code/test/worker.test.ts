@@ -9,65 +9,102 @@ afterEach(() => {
 });
 
 describe("worker URL parameters", () => {
-    it("requires positive width and height parameters", async () => {
+    it("requires a positive width parameter", async () => {
         const response = await worker.fetch(
-            new Request("https://starcards.example/?width=0&height=148"),
+            new Request("https://starcards.example/?width=0"),
+            undefined,
+            {} as ExecutionContext,
+        );
+
+        expect(response.status).toBe(400);
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        expect(response.headers.get("cloudflare-cdn-cache-control")).toBeNull();
+        await expect(response.text()).resolves.toBe(
+            "width must be a positive integer",
+        );
+    });
+
+    it("rejects a non-positive cards parameter", async () => {
+        const response = await worker.fetch(
+            new Request("https://starcards.example/?width=640&cards=0"),
             undefined,
             {} as ExecutionContext,
         );
 
         expect(response.status).toBe(400);
         await expect(response.text()).resolves.toBe(
-            "width and height must be positive integers",
+            "cards must be a positive integer",
         );
     });
 
-    it("bypasses cache reads and writes when noCache is true", async () => {
-        const match = vi.fn();
-        const put = vi.fn();
-        vi.stubGlobal("caches", { default: { match, put } });
-        vi.stubGlobal("fetch", async () => Response.json([]));
+    it("renders only as many cards as the cards parameter", async () => {
+        vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+            const url = input instanceof Request ? input.url : input.toString();
+
+            if (url.includes("/users/SegoCode/repos")) {
+                return Response.json([
+                    {
+                        fork: false,
+                        full_name: "SegoCode/alpha",
+                        name: "alpha",
+                        stargazers_count: 3,
+                    },
+                ]);
+            }
+
+            if (url.includes("/repos/SegoCode/alpha/events")) {
+                return Response.json([
+                    {
+                        type: "WatchEvent",
+                        actor: {
+                            login: "one",
+                            avatar_url: "https://avatars.example/1",
+                        },
+                        created_at: "2026-03-03T00:00:00Z",
+                    },
+                    {
+                        type: "WatchEvent",
+                        actor: {
+                            login: "two",
+                            avatar_url: "https://avatars.example/2",
+                        },
+                        created_at: "2026-03-02T00:00:00Z",
+                    },
+                    {
+                        type: "WatchEvent",
+                        actor: {
+                            login: "three",
+                            avatar_url: "https://avatars.example/3",
+                        },
+                        created_at: "2026-03-01T00:00:00Z",
+                    },
+                ]);
+            }
+
+            return new Response(null, { status: 404 });
+        });
 
         const response = await worker.fetch(
             new Request(
-                "https://starcards.example/?width=640&height=148&noCache=true",
+                "https://starcards.example/?width=640&height=800&cards=2",
             ),
             undefined,
-            { waitUntil: vi.fn() } as unknown as ExecutionContext,
+            {} as ExecutionContext,
         );
+        const svg = await response.text();
 
         expect(response.status).toBe(200);
         expect(response.headers.get("cache-control")).toBe("no-store");
-        expect(match).not.toHaveBeenCalled();
-        expect(put).not.toHaveBeenCalled();
-        await expect(response.text()).resolves.toContain(
-            '<svg xmlns="http://www.w3.org/2000/svg" width="640" height="148"',
+        expect(response.headers.get("cloudflare-cdn-cache-control")).toBe(
+            "max-age=3600",
         );
-    });
-
-    it("caches for one hour by default", async () => {
-        const match = vi.fn().mockResolvedValue(undefined);
-        const put = vi.fn().mockResolvedValue(undefined);
-        const waitUntil = vi.fn();
-        vi.stubGlobal("caches", { default: { match, put } });
-        vi.stubGlobal("fetch", async () => Response.json([]));
-
-        const request = new Request(
-            "https://starcards.example/?width=800&height=148",
-        );
-        const response = await worker.fetch(
-            request,
-            undefined,
-            { waitUntil } as unknown as ExecutionContext,
-        );
-
-        expect(response.status).toBe(200);
-        expect(response.headers.get("cache-control")).toBe(
-            "public, max-age=3600",
-        );
-        expect(match).toHaveBeenCalledWith(request);
-        expect(put).toHaveBeenCalledOnce();
-        expect(waitUntil).toHaveBeenCalledOnce();
+        expect(svg.match(/class="card"/g)).toHaveLength(2);
+        expect(svg).toContain('width="640"');
+        expect(svg).toContain('height="121"');
+        expect(svg).not.toContain('height="800"');
+        expect(svg).toContain(">one</text>");
+        expect(svg).toContain(">two</text>");
+        expect(svg).not.toContain(">three</text>");
     });
 });
 
@@ -171,7 +208,7 @@ describe("recentStars", () => {
 });
 
 describe("renderStars", () => {
-    it("renders a dark SVG and escapes GitHub text", async () => {
+    it("renders a light SVG and escapes GitHub text", async () => {
         vi.stubGlobal("fetch", async () => new Response(null, { status: 404 }));
 
         const svg = await renderStars(
@@ -183,15 +220,15 @@ describe("renderStars", () => {
                     starredAt: new Date().toISOString(),
                 },
             ],
-            { width: 640, height: 148 },
-            "dark",
+            640,
         );
 
-        expect(svg).toContain('height="148"');
+        expect(svg).toContain('height="63"');
         expect(svg).toContain('width="640"');
         expect(svg).toContain("name&lt;&amp;&gt;&quot;");
         expect(svg).toContain("repo&lt;&amp;&gt;&quot;");
-        expect(svg).toContain(".card { fill: #101218;");
+        expect(svg).toContain("stroke: #c69026");
         expect(svg).not.toContain("prefers-color-scheme");
+        expect(svg).not.toContain("#101218");
     });
 });
