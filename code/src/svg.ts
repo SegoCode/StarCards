@@ -1,10 +1,11 @@
 import type { Star } from "./github";
 
-const CARD_HEIGHT = 48;
+const CARD_TOP = 5;
+const CARD_HEIGHT = 58;
+const CARD_BODY_HEIGHT = 48;
 
-export interface Dimensions {
-    width: number;
-    height: number;
+export function stackHeight(cardCount: number): number {
+    return CARD_TOP + cardCount * CARD_HEIGHT;
 }
 
 const XML_ENTITIES: Record<string, string> = {
@@ -16,15 +17,14 @@ const XML_ENTITIES: Record<string, string> = {
 
 export async function renderStars(
     stars: readonly Star[],
-    dimensions: Dimensions,
-    theme: string | null,
+    width: number,
 ): Promise<string> {
-    const { width, height } = dimensions;
+    const height = stackHeight(stars.length);
     const avatars = await Promise.all(stars.map(star => inlineAvatar(star.avatarUrl)));
     const clips = stars
         .map((_, index) => {
-            const y = 4 + index * CARD_HEIGHT;
-            return `<clipPath id="c${index}"><circle cx="26" cy="${y + 20}" r="16"/></clipPath>`;
+            const y = CARD_TOP + index * CARD_HEIGHT;
+            return `<clipPath id="c${index}"><circle cx="31" cy="${y + 24}" r="19"/></clipPath>`;
         })
         .join("");
     const cards = stars
@@ -33,7 +33,7 @@ export async function renderStars(
 
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
         <defs>
-            <style>${themeCss(theme)}</style>
+            <style>${CARD_CSS}</style>
             <linearGradient id="fg" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0" stop-color="#fff"/>
                 <stop offset=".45" stop-color="#fff"/>
@@ -49,7 +49,9 @@ export async function renderStars(
 
 async function inlineAvatar(url: string): Promise<string> {
     try {
-        const response = await fetch(url);
+        const response = await fetch(url, {
+            cf: { cacheTtl: 3600, cacheEverything: true },
+        });
         if (!response.ok) {
             return "";
         }
@@ -81,34 +83,13 @@ function escapeXml(value: string): string {
     return value.replace(/[&<>"]/g, character => XML_ENTITIES[character] ?? character);
 }
 
-function themeCss(theme: string | null): string {
-    const base = `
+const CARD_CSS = `
         text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    `;
-    const light = `
         .card { fill: #f6f8fa; fill-opacity: .94; stroke: #c69026; stroke-opacity: .4; }
         .login { fill: #1f2328; }
         .repo { fill: #9a6700; }
         .time { fill: #59636e; }
     `;
-    const dark = `
-        .card { fill: #101218; fill-opacity: .78; stroke: #e3b341; stroke-opacity: .18; }
-        .login { fill: #e8e6e1; }
-        .repo { fill: #e3b341; }
-        .time { fill: #8b8f9a; }
-    `;
-
-    if (theme === "dark") {
-        return base + dark;
-    }
-    if (theme === "light") {
-        return base + light;
-    }
-    return `${base}${light}
-        @media (prefers-color-scheme: dark) {
-            ${dark}
-        }`;
-}
 
 
 function card(
@@ -117,14 +98,14 @@ function card(
     avatar: string | undefined,
     width: number,
 ): string {
-    const y = 4 + index * CARD_HEIGHT;
+    const y = CARD_TOP + index * CARD_HEIGHT;
     const image = avatar
-        ? `<image href="${avatar}" x="10" y="${y + 4}" width="32" height="32" clip-path="url(#c${index})"/>`
+        ? `<image href="${avatar}" x="12" y="${y + 5}" width="38" height="38" clip-path="url(#c${index})"/>`
         : "";
 
-    return `<rect class="card" x="2" y="${y}" width="${width - 4}" height="40" rx="10"/>
+    return `<rect class="card" x="2" y="${y}" width="${width - 4}" height="${CARD_BODY_HEIGHT}" rx="12"/>
         ${image}
-        <text class="login" x="50" y="${y + 17}" font-size="13" font-weight="650">${escapeXml(star.login)}</text>
-        <text class="repo" x="50" y="${y + 32}" font-size="12">★ ${escapeXml(star.repository)}</text>
-        <text class="time" x="${width - 14}" y="${y + 24}" font-size="11" text-anchor="end">${ago(star.starredAt)}</text>`;
+        <text class="login" x="60" y="${y + 20}" font-size="16" font-weight="650">${escapeXml(star.login)}</text>
+        <text class="repo" x="60" y="${y + 38}" font-size="14">★ ${escapeXml(star.repository)}</text>
+        <text class="time" x="${width - 17}" y="${y + 29}" font-size="13" text-anchor="end">${ago(star.starredAt)}</text>`;
 }
