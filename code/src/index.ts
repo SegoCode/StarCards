@@ -1,74 +1,53 @@
 import { recentStars } from "./github";
-import { renderStars } from "./svg";
+import { renderStars, stackHeight } from "./svg";
 
 const CARD_COUNT = 3;
-const PUBLIC_CACHE = "public, max-age=3600";
 
 const worker = {
     async fetch(
         request: Request,
         _env: unknown,
-        context: ExecutionContext,
+        _context: ExecutionContext,
     ): Promise<Response> {
         const url = new URL(request.url);
         const widthParam = url.searchParams.get("width");
-        const heightParam = url.searchParams.get("height");
         const width = Number(widthParam);
-        const height = Number(heightParam);
         if (
             widthParam === null ||
-            heightParam === null ||
             !/^[1-9]\d*$/.test(widthParam) ||
-            !/^[1-9]\d*$/.test(heightParam) ||
-            !Number.isSafeInteger(width) ||
-            !Number.isSafeInteger(height)
+            !Number.isSafeInteger(width)
         ) {
-            return new Response("width and height must be positive integers", {
+            return new Response("width must be a positive integer", {
                 status: 400,
                 headers: { "cache-control": "no-store" },
             });
         }
 
-        const noCacheParam = url.searchParams.get("noCache");
+        const cardsParam = url.searchParams.get("cards");
+        const cards = Number(cardsParam);
         if (
-            noCacheParam !== null &&
-            noCacheParam !== "true" &&
-            noCacheParam !== "false"
+            cardsParam !== null &&
+            (!/^[1-9]\d*$/.test(cardsParam) || !Number.isSafeInteger(cards))
         ) {
-            return new Response("noCache must be true or false", {
+            return new Response("cards must be a positive integer", {
                 status: 400,
                 headers: { "cache-control": "no-store" },
             });
         }
 
-        const noCache = noCacheParam === "true";
-        if (!noCache) {
-            const cached = await caches.default.match(request);
-            if (cached) {
-                return cached;
-            }
-        }
-
-        const dimensions = { width, height };
+        const cardCount = cardsParam === null ? CARD_COUNT : cards;
         try {
-            const theme = url.searchParams.get("theme");
-            const stars = await recentStars(CARD_COUNT);
-            const response = new Response(
-                await renderStars(stars, dimensions, theme),
-                {
-                    headers: {
-                        "content-type": "image/svg+xml; charset=utf-8",
-                        "cache-control": noCache ? "no-store" : PUBLIC_CACHE,
-                    },
+            const stars = await recentStars(cardCount);
+            return new Response(await renderStars(stars, width), {
+                headers: {
+                    "content-type": "image/svg+xml; charset=utf-8",
+                    "cache-control": "no-store",
+                    "cloudflare-cdn-cache-control": "max-age=3600",
                 },
-            );
-            if (!noCache) {
-                context.waitUntil(caches.default.put(request, response.clone()));
-            }
-            return response;
+            });
         } catch {
             return new Response(
-                `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"/>`,
+                `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${stackHeight(cardCount)}"/>`,
                 {
                     headers: {
                         "content-type": "image/svg+xml; charset=utf-8",
