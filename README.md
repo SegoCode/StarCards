@@ -1,12 +1,13 @@
 # StarCards
 
-<h3 align="center"><img src="media/demo.png"></h3>
+<h3 align="center"><img src="media/demo-card.png"></h3>
+
+<h3 align="center"><img src="media/demo-feed.png"></h3>
 
 <p align="center">
   <a href="#about">About</a> •
   <a href="#features">Features</a> •
-  <a href="#quick-start--information">Quick Start & Information</a> •
-  <a href="#download">Download</a> 
+  <a href="#quick-start--information">Quick Start & Information</a>
 </p>
 
 ## About
@@ -16,55 +17,57 @@
 [![Licencia: PolyForm Noncommercial + GNU AGPL-3.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%20%2B%20GNU%20AGPL--3.0-blue?style=flat-square)](https://github.com/SegoCode/StarCards/blob/main/LICENSE)
 [![Bitcoin BTC](https://img.shields.io/badge/buy_me_a_coffee-BTC-F7931A?style=flat-square&logo=bitcoin&logoColor=white)](https://github.com/SegoCode/SegoCode/discussions/2)
 
-
-This section should provide a concise introduction to the application, explaining its primary function and the problem it addresses. 
+StarCards is a Cloudflare Worker that returns an SVG of the latest GitHub stars on your repositories. You deploy your own instance, then embed that URL in markdown.
 
 ## Features
 
-- Feature 1: Describe the first key feature of the app. Explain how it benefits the user or improves upon existing solutions.
-
-- Feature 2: Describe the second key feature, focusing on its functionality and any integration capabilities with other tools or platforms.
-
-- Feature 3: Outline a third feature, detailing its use case and any user-driven components or customization options.
-
-- Add more features as needed...
+- Card layout by default, feed layout with `layout=feed`
+- `width` sets the SVG size; `cards` sets how many rows (default 3)
+- The service inlines each avatar in the SVG
+- Cloudflare caches the image for one hour
 
 ## Quick Start & Information
 
-Provide a simple, step-by-step guide on how to set up and start using the application.
+Set `OWNER` in `code/src/github.ts` to your GitHub username. From `code/`:
 
-> [!NOTE]  
-> Highlights information that users should take into account, even when skimming.
+```
+pnpm install
+pnpm deploy
+```
 
-> [!TIP]
-> Optional information to help a user be more successful.
+Wrangler prints a `*.workers.dev` URL. Embed it:
 
-> [!IMPORTANT]  
-> Crucial information necessary for users to succeed.
+```
+![stars](https://starcards.<subdomain>.workers.dev/?width=995)
+```
 
-> [!WARNING]  
-> Critical content demanding immediate user attention due to potential risks.
+```
+<img src="https://starcards.<subdomain>.workers.dev/?width=640">
+```
 
-> [!CAUTION]
-> Negative potential consequences of an action.
+```
+![stars](https://starcards.<subdomain>.workers.dev/?width=995&layout=feed)
+```
+
+> [!NOTE]
+> Point `OWNER` at your GitHub user before you deploy. Cloudflare caches each URL for one hour.
 
 ### Available Parameters
 
-Example 1
-```shell
-example.exe -help
 ```
-*Describes what happens when the help command is executed.*
-
-Example 2
-```shell
-example.exe -done
+https://starcards.<subdomain>.workers.dev/?width=640
 ```
-*Explains the outcome when the done command is used.*
+*Required. SVG width in pixels, a positive integer.*
 
-## Download
+```
+https://starcards.<subdomain>.workers.dev/?width=640&cards=5
+```
+*How many star rows to draw. Defaults to 3.*
 
-Provide a direct link to where users can download the application
+```
+https://starcards.<subdomain>.workers.dev/?width=640&layout=feed
+```
+*`card` (default) or `feed`.*
 
 ---
 <p align="center"><a href="https://github.com/SegoCode/StarCards/graphs/contributors">
