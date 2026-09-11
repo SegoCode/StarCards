@@ -25,7 +25,7 @@ To initialize the repository:
 
 4. **Review the generated changes**:
 
-   - The workflow replaces all instances of `{reponame}` and `{username}` in all files with the actual repository name and username.
+   - The workflow replaces all instances of `StarCards` and `SegoCode` in all files with the actual repository name and username.
    - It removes the initializer workflow file (`initializer.yml`).
    - It creates `develop` if needed.
    - It commits these changes to `chore/initialize-repository` using a Conventional Commit and opens a PR to `main`.
@@ -57,7 +57,7 @@ We use a branching model inspired by Gitflow to manage our development process:
 Fork the repository to your own GitHub account and clone it to your local machine:
 
 ```
-git clone https://github.com/{username}/{reponame}.git
+git clone https://github.com/SegoCode/StarCards.git
 ```
 
 ### 2. Create a Feature Branch
