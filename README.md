@@ -21,10 +21,10 @@ StarCards is a Cloudflare Worker that returns an SVG of the latest GitHub stars 
 
 ## Features
 
-- Card layout by default, feed layout with `layout=feed`
-- `width` sets the SVG size; `cards` sets how many rows (default 3)
-- The service inlines each avatar in the SVG
-- Cloudflare caches the image for one hour
+- SVG built for GitHub READMEs
+- Two layouts: stacked cards or a star feed
+- Inlined GitHub avatars
+- Cloudflare caches the SVG at the edge
 
 ## Quick Start & Information
 
@@ -54,20 +54,22 @@ Wrangler prints a `*.workers.dev` URL. Embed it:
 
 ### Available Parameters
 
+Query string on the worker URL. Unknown names are ignored.
+
 ```
 https://starcards.<subdomain>.workers.dev/?width=640
 ```
-*Required. SVG width in pixels, a positive integer.*
+*`width` (required). SVG width in pixels. Must be a positive integer (for example `640`). Height follows the layout and the number of rows. Missing, `0`, or any non-integer returns HTTP 400 with `width must be a positive integer`.*
 
 ```
 https://starcards.<subdomain>.workers.dev/?width=640&cards=5
 ```
-*How many star rows to draw. Defaults to 3.*
+*`cards` (optional). How many star rows to draw. Must be a positive integer. Omit it and the worker draws 3. Invalid values return HTTP 400 with `cards must be a positive integer`.*
 
 ```
 https://starcards.<subdomain>.workers.dev/?width=640&layout=feed
 ```
-*`card` (default) or `feed`.*
+*`layout` (optional). `card` or `feed`. Omit it or pass `card` for stacked cards (login, starred repo, time). `feed` draws one line per event: `login starred repo`. Any other value returns HTTP 400 with `layout must be card or feed`.*
 
 ---
 <p align="center"><a href="https://github.com/SegoCode/StarCards/graphs/contributors">
