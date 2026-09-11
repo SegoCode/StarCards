@@ -35,10 +35,23 @@ const worker = {
             });
         }
 
+        const layoutParam = url.searchParams.get("layout");
+        if (
+            layoutParam !== null &&
+            layoutParam !== "card" &&
+            layoutParam !== "feed"
+        ) {
+            return new Response("layout must be card or feed", {
+                status: 400,
+                headers: { "cache-control": "no-store" },
+            });
+        }
+        const layout = layoutParam === "feed" ? "feed" : "card";
+
         const cardCount = cardsParam === null ? CARD_COUNT : cards;
         try {
             const stars = await recentStars(cardCount);
-            return new Response(await renderStars(stars, width), {
+            return new Response(await renderStars(stars, width, layout), {
                 headers: {
                     "content-type": "image/svg+xml; charset=utf-8",
                     "cache-control": "no-store",
@@ -47,7 +60,7 @@ const worker = {
             });
         } catch {
             return new Response(
-                `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${stackHeight(cardCount)}"/>`,
+                `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${stackHeight(cardCount, layout)}"/>`,
                 {
                     headers: {
                         "content-type": "image/svg+xml; charset=utf-8",
