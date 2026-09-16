@@ -40,6 +40,7 @@ export async function recentStars(limit: number): Promise<Star[]> {
 
     return events
         .flat()
+        .filter(star => star.login.toLowerCase() !== OWNER.toLowerCase())
         .sort((left, right) => right.starredAt.localeCompare(left.starredAt))
         .slice(0, limit);
 }
