@@ -164,6 +164,134 @@ describe("worker URL parameters", () => {
         expect(svg).not.toContain('class="card"');
         expect(svg).toContain(">one</tspan>");
     });
+
+    it("returns JSON diagnostics when debug=true", async () => {
+        vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+            const url = input instanceof Request ? input.url : input.toString();
+
+            if (url.includes("/users/SegoCode/repos")) {
+                return Response.json([
+                    {
+                        fork: false,
+                        full_name: "SegoCode/alpha",
+                        name: "alpha",
+                        stargazers_count: 1,
+                    },
+                ]);
+            }
+
+            if (url.includes("/repos/SegoCode/alpha/events")) {
+                return Response.json([
+                    {
+                        type: "WatchEvent",
+                        actor: {
+                            login: "one",
+                            avatar_url: "https://avatars.example/1",
+                        },
+                        created_at: "2026-03-03T00:00:00Z",
+                    },
+                ]);
+            }
+
+            return new Response(null, { status: 404 });
+        });
+
+        const response = await worker.fetch(
+            new Request("https://starcards.example/?width=640&debug=true"),
+            undefined,
+            {} as ExecutionContext,
+        );
+        const body = await response.json() as {
+            ok: boolean;
+            stars: Array<{ login: string; hoursAgo: number }>;
+            raw: unknown[];
+            repositories: Array<{ name: string; watchCount: number }>;
+            cache: { discarded: boolean; hasLastGood: boolean };
+        };
+
+        expect(response.status).toBe(200);
+        expect(response.headers.get("content-type")).toBe(
+            "application/json; charset=utf-8",
+        );
+        expect(response.headers.get("cache-control")).toBe("no-store");
+        expect(response.headers.get("cloudflare-cdn-cache-control")).toBeNull();
+        expect(body.ok).toBe(true);
+        expect(body.stars[0]?.login).toBe("one");
+        expect(body.stars[0]?.hoursAgo).toEqual(expect.any(Number));
+        expect(body.raw).toHaveLength(1);
+        expect(body.repositories[0]).toEqual(
+            expect.objectContaining({ name: "alpha", watchCount: 1 }),
+        );
+        expect(body.cache).toEqual({ discarded: false, hasLastGood: false });
+    });
+
+    it("serves the last good SVG when a later run hits GitHub 4xx", async () => {
+        const store = new Map<string, Response>();
+        vi.stubGlobal("caches", {
+            default: {
+                match: async (request: Request) =>
+                    store.get(new URL(request.url).toString())?.clone(),
+                put: async (request: Request, response: Response) => {
+                    store.set(new URL(request.url).toString(), response.clone());
+                },
+            },
+        });
+
+        let alphaOk = true;
+        vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+            const url = input instanceof Request ? input.url : input.toString();
+
+            if (url.includes("/users/SegoCode/repos")) {
+                return Response.json([
+                    {
+                        fork: false,
+                        full_name: "SegoCode/alpha",
+                        name: "alpha",
+                        stargazers_count: 1,
+                    },
+                ]);
+            }
+
+            if (url.includes("/repos/SegoCode/alpha/events")) {
+                if (!alphaOk) {
+                    return new Response("rate limited", { status: 403 });
+                }
+                return Response.json([
+                    {
+                        type: "WatchEvent",
+                        actor: {
+                            login: "one",
+                            avatar_url: "https://avatars.example/1",
+                        },
+                        created_at: "2026-03-03T00:00:00Z",
+                    },
+                ]);
+            }
+
+            return new Response(null, { status: 404 });
+        });
+
+        const live = new Request("https://starcards.example/?width=640");
+        const first = await worker.fetch(
+            live,
+            undefined,
+            {} as ExecutionContext,
+        );
+        const firstSvg = await first.text();
+        expect(firstSvg).toContain(">one</text>");
+        expect(first.headers.get("cloudflare-cdn-cache-control")).toBe(
+            "max-age=3600",
+        );
+
+        alphaOk = false;
+        const second = await worker.fetch(
+            new Request("https://starcards.example/?width=640"),
+            undefined,
+            {} as ExecutionContext,
+        );
+        expect(second.headers.get("x-starcards-cache")).toBe("last-good");
+        await expect(second.text()).resolves.toBe(firstSvg);
+    });
 });
 
 describe("recentStars", () => {
@@ -256,7 +384,19 @@ describe("recentStars", () => {
             throw new Error(`Unexpected request: ${url}`);
         });
 
-        await expect(recentStars(2)).resolves.toEqual([
+        const run = await recentStars(2);
+
+        expect(run.ok).toBe(true);
+        expect(run.ignored).toEqual({ forks: 1, noStars: 1, unparsed: 0 });
+        expect(run.droppedOwnerStars).toEqual([
+            {
+                login: "segocode",
+                avatarUrl: "https://avatars.example/owner",
+                repository: "alpha",
+                starredAt: "2026-05-01T00:00:00Z",
+            },
+        ]);
+        expect(run.stars).toEqual([
             {
                 login: "beta-user",
                 avatarUrl: "https://avatars.example/beta",
@@ -269,6 +409,67 @@ describe("recentStars", () => {
                 repository: "alpha",
                 starredAt: "2026-02-01T00:00:00Z",
             },
+        ]);
+    });
+
+    it("records a 4xx events fetch without dropping the other repos", async () => {
+        vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+            const url = input instanceof Request ? input.url : input.toString();
+
+            if (url.includes("/users/SegoCode/repos")) {
+                return Response.json([
+                    {
+                        fork: false,
+                        full_name: "SegoCode/alpha",
+                        name: "alpha",
+                        stargazers_count: 4,
+                    },
+                    {
+                        fork: false,
+                        full_name: "SegoCode/beta",
+                        name: "beta",
+                        stargazers_count: 2,
+                    },
+                ]);
+            }
+
+            if (url.includes("/repos/SegoCode/alpha/events")) {
+                return new Response("rate limited", { status: 403 });
+            }
+
+            if (url.includes("/repos/SegoCode/beta/events")) {
+                return Response.json([
+                    {
+                        type: "WatchEvent",
+                        actor: {
+                            login: "beta-user",
+                            avatar_url: "https://avatars.example/beta",
+                        },
+                        created_at: "2026-03-01T00:00:00Z",
+                    },
+                ]);
+            }
+
+            throw new Error(`Unexpected request: ${url}`);
+        });
+
+        const run = await recentStars(2);
+
+        expect(run.ok).toBe(false);
+        expect(run.stars).toEqual([
+            {
+                login: "beta-user",
+                avatarUrl: "https://avatars.example/beta",
+                repository: "beta",
+                starredAt: "2026-03-01T00:00:00Z",
+            },
+        ]);
+        expect(run.errors).toEqual([
+            expect.objectContaining({
+                repository: "alpha",
+                status: 403,
+                message: "GitHub API returned 403",
+            }),
         ]);
     });
 });
