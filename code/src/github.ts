@@ -88,7 +88,10 @@ export async function recentStars(limit: number): Promise<StarRun> {
         repositories.push(repository);
     }
 
-    const fetches = await Promise.all(repositories.map(watchEvents));
+    repositories.sort((left, right) => right.starCount - left.starCount);
+    const fetches = await Promise.all(
+        repositories.slice(0, Math.max(limit, 3)).map(watchEvents),
+    );
     const errors = fetches.flatMap(fetch => fetch.errors);
     const raw = fetches.flatMap(fetch => fetch.stars);
     const ownerName = OWNER.toLowerCase();
