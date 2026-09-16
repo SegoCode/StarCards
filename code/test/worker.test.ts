@@ -206,6 +206,14 @@ describe("recentStars", () => {
                     {
                         type: "WatchEvent",
                         actor: {
+                            login: "segocode",
+                            avatar_url: "https://avatars.example/owner",
+                        },
+                        created_at: "2026-05-01T00:00:00Z",
+                    },
+                    {
+                        type: "WatchEvent",
+                        actor: {
                             login: "alpha-user",
                             avatar_url: "https://avatars.example/alpha",
                             id: 10,
