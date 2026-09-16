@@ -472,6 +472,104 @@ describe("recentStars", () => {
             }),
         ]);
     });
+
+    it("fetches events only for the top repositories by star count", async () => {
+        vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+            const url = input instanceof Request ? input.url : input.toString();
+
+            if (url.includes("/users/SegoCode/repos")) {
+                return Response.json([
+                    {
+                        fork: false,
+                        full_name: "SegoCode/tiny",
+                        name: "tiny",
+                        stargazers_count: 1,
+                    },
+                    {
+                        fork: false,
+                        full_name: "SegoCode/hot",
+                        name: "hot",
+                        stargazers_count: 10,
+                    },
+                    {
+                        fork: false,
+                        full_name: "SegoCode/mid",
+                        name: "mid",
+                        stargazers_count: 8,
+                    },
+                    {
+                        fork: false,
+                        full_name: "SegoCode/low",
+                        name: "low",
+                        stargazers_count: 5,
+                    },
+                ]);
+            }
+
+            if (url.includes("/repos/SegoCode/hot/events")) {
+                return Response.json([
+                    {
+                        type: "WatchEvent",
+                        actor: {
+                            login: "hot-user",
+                            avatar_url: "https://avatars.example/hot",
+                        },
+                        created_at: "2026-01-01T00:00:00Z",
+                    },
+                ]);
+            }
+
+            if (url.includes("/repos/SegoCode/mid/events")) {
+                return Response.json([
+                    {
+                        type: "WatchEvent",
+                        actor: {
+                            login: "mid-user",
+                            avatar_url: "https://avatars.example/mid",
+                        },
+                        created_at: "2026-02-01T00:00:00Z",
+                    },
+                ]);
+            }
+
+            if (url.includes("/repos/SegoCode/low/events")) {
+                return Response.json([
+                    {
+                        type: "WatchEvent",
+                        actor: {
+                            login: "low-user",
+                            avatar_url: "https://avatars.example/low",
+                        },
+                        created_at: "2026-03-01T00:00:00Z",
+                    },
+                ]);
+            }
+
+            throw new Error(`Unexpected request: ${url}`);
+        });
+
+        const run = await recentStars(2);
+
+        expect(run.repositories.map(repository => repository.name)).toEqual([
+            "hot",
+            "mid",
+            "low",
+        ]);
+        expect(run.stars).toEqual([
+            {
+                login: "low-user",
+                avatarUrl: "https://avatars.example/low",
+                repository: "low",
+                starredAt: "2026-03-01T00:00:00Z",
+            },
+            {
+                login: "mid-user",
+                avatarUrl: "https://avatars.example/mid",
+                repository: "mid",
+                starredAt: "2026-02-01T00:00:00Z",
+            },
+        ]);
+    });
 });
 
 describe("renderStars", () => {
