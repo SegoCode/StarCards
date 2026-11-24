@@ -128,7 +128,7 @@ function card(
         ? `<image href="${avatar}" x="12" y="${y + 5}" width="38" height="38" clip-path="url(#c${index})"/>`
         : "";
 
-    return `<rect class="card" x="2" y="${y}" width="${width - 4}" height="${CARD_BODY_HEIGHT}" rx="12"/>
+    return `<rect class="card" x="2.5" y="${y + 0.5}" width="${width - 5}" height="${CARD_BODY_HEIGHT - 1}" rx="12"/>
         ${image}
         <text class="login" x="60" y="${y + 20}" font-size="16" font-weight="650">${escapeXml(star.login)}</text>
         <text class="repo" x="60" y="${y + 38}" font-size="14">★ ${escapeXml(star.repository)}</text>
