@@ -26,9 +26,12 @@ export async function renderStars(
     stars: readonly Star[],
     width: number,
     layout: "card" | "feed" = "card",
-    borderColor = "c69026",
+    borderColor?: string,
 ): Promise<string> {
     const height = stackHeight(stars.length, layout);
+    const stroke = borderColor === undefined
+        ? "stroke: #c69026; stroke-opacity: .4;"
+        : `stroke: #${borderColor}; stroke-opacity: 1;`;
     const avatars = await Promise.all(stars.map(star => inlineAvatar(star.avatarUrl)));
     const clips = stars
         .map((_, index) => {
@@ -58,7 +61,7 @@ export async function renderStars(
         <defs>
             <style>
                 text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-                .card { fill: #f6f8fa; fill-opacity: .94; stroke: #${borderColor}; stroke-opacity: .4; }
+                .card { fill: #f6f8fa; fill-opacity: .94; ${stroke} }
                 .login { fill: #1f2328; }
                 .repo { fill: #9a6700; }
                 .time { fill: #59636e; }
