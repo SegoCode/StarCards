@@ -12,8 +12,8 @@
 [![Top language](https://img.shields.io/github/languages/top/SegoCode/StarCards?style=flat-square)](https://github.com/SegoCode/StarCards)
 [![Repository size](https://img.shields.io/github/repo-size/SegoCode/StarCards?style=flat-square&label=repo%20size)](https://github.com/SegoCode/StarCards)
 [![Commit activity per year](https://img.shields.io/github/commit-activity/y/SegoCode/StarCards?style=flat-square&label=commits)](https://github.com/SegoCode/StarCards/graphs/commit-activity)
-[![Licencia: PolyForm Noncommercial + GNU AGPL-3.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%20%2B%20GNU%20AGPL--3.0-blue?style=flat-square)](https://github.com/SegoCode/StarCards/blob/main/LICENSE)
 [![AI: Highly Assisted](https://img.shields.io/badge/AI-Highly%20Assisted-007ec6?style=flat-square)](https://github.com/SegoCode/StarCards)
+[![Licencia: PolyForm Noncommercial + GNU AGPL-3.0](https://img.shields.io/badge/License-PolyForm%20Noncommercial%20%2B%20GNU%20AGPL--3.0-blue?style=flat-square)](https://github.com/SegoCode/StarCards/blob/main/LICENSE)
 [![Bitcoin BTC](https://img.shields.io/badge/buy_me_a_coffee-BTC-F7931A?style=flat-square&logo=bitcoin&logoColor=white)](https://github.com/SegoCode/SegoCode/discussions/2)
 
 StarCards is a Cloudflare Worker that returns an SVG of the latest GitHub stars on your repositories. You deploy your own instance, then embed that URL in markdown.
