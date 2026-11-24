@@ -60,15 +60,18 @@ https://starcards.<subdomain>.workers.dev/?width=640
 ```
 *`width` (required). SVG width in pixels. Must be a positive integer (for example `640`). Height follows the layout and the number of rows. Missing, `0`, or any non-integer returns HTTP 400 with `width must be a positive integer`.*
 
+
 ```
 https://starcards.<subdomain>.workers.dev/?width=640&cards=5
 ```
 *`cards` (optional). How many star rows to draw. Must be a positive integer. Omit it and the worker draws 3. Invalid values return HTTP 400 with `cards must be a positive integer`.*
 
+
 ```
 https://starcards.<subdomain>.workers.dev/?width=640&layout=feed
 ```
 *`layout` (optional). `card` or `feed`. Omit it or pass `card` for stacked cards (login, starred repo, time). `feed` draws one line per event: `login starred repo`. Any other value returns HTTP 400 with `layout must be card or feed`.*
+
 
 ```
 https://starcards.<subdomain>.workers.dev/?width=640&borderColor=2277ff
