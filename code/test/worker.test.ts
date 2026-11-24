@@ -619,10 +619,18 @@ describe("renderStars", () => {
         expect(svg).toContain('width="640"');
         expect(svg).toContain("name&lt;&amp;&gt;&quot;");
         expect(svg).toContain("repo&lt;&amp;&gt;&quot;");
-        expect(svg).toContain("stroke: #c69026");
+        expect(svg).toContain("stroke: #c69026; stroke-opacity: .4;");
         expect(svg).not.toContain("starred");
         expect(svg).not.toContain("prefers-color-scheme");
         expect(svg).not.toContain("#101218");
+    });
+
+    it("draws a custom border color at full opacity", async () => {
+        vi.stubGlobal("fetch", async () => new Response(null, { status: 404 }));
+
+        const svg = await renderStars([], 640, "card", "36393e");
+
+        expect(svg).toContain("stroke: #36393e; stroke-opacity: 1;");
     });
 
     it("renders the feed sentence layout", async () => {
