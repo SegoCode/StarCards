@@ -73,7 +73,7 @@ https://starcards.<subdomain>.workers.dev/?width=640&layout=feed
 ```
 https://starcards.<subdomain>.workers.dev/?width=640&borderColor=2277ff
 ```
-*`borderColor` (optional). Card outline color as six hexadecimal digits. Use `2277ff` or `%232277ff` (the URL-encoded form of `#2277ff`). Defaults to `#c69026` and does not change `layout=feed`. Invalid values return HTTP 400 with `borderColor must be a six-digit hex color`.*
+*`borderColor` (optional). Card outline color as six hexadecimal digits. Use `2277ff` or `%232277ff` (the URL-encoded form of `#2277ff`). Defaults to `#c69026` and does not change `layout=feed`. Invalid values return HTTP 400 with `borderColor must be a six-digit hex`.*
 
 ---
 <p align="center"><a href="https://github.com/SegoCode/StarCards/graphs/contributors">
