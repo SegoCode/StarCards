@@ -53,30 +53,25 @@ Wrangler prints a `*.workers.dev` URL. Embed it:
 
 ### Available Parameters
 
-Query string on the worker URL. Unknown names are ignored.
-
 ```
 https://starcards.<subdomain>.workers.dev/?width=640
 ```
-*`width` (required). SVG width in pixels. Must be a positive integer (for example `640`). Height follows the layout and the number of rows. Missing, `0`, or any non-integer returns HTTP 400 with `width must be a positive integer`.*
-
+- *`width` (required). SVG width in pixels. Must be a positive integer (for example `640`). Height follows the layout and the number of rows. Missing, `0`, or any non-integer returns HTTP 400 with `width must be a positive integer`.*
 
 ```
 https://starcards.<subdomain>.workers.dev/?width=640&cards=5
 ```
-*`cards` (optional). How many star rows to draw. Must be a positive integer. Omit it and the worker draws 3. Invalid values return HTTP 400 with `cards must be a positive integer`.*
-
+- *`cards` (optional). How many star rows to draw. Must be a positive integer. Omit it and the worker draws 3. Invalid values return HTTP 400 with `cards must be a positive integer`.*
 
 ```
 https://starcards.<subdomain>.workers.dev/?width=640&layout=feed
 ```
-*`layout` (optional). `card` or `feed`. Omit it or pass `card` for stacked cards (login, starred repo, time). `feed` draws one line per event: `login starred repo`. Any other value returns HTTP 400 with `layout must be card or feed`.*
-
+- *`layout` (optional). `card` or `feed`. Omit it or pass `card` for stacked cards (login, starred repo, time). `feed` draws one line per event: `login starred repo`. Any other value returns HTTP 400 with `layout must be card or feed`.*
 
 ```
 https://starcards.<subdomain>.workers.dev/?width=640&borderColor=2277ff
 ```
-*`borderColor` (optional). Card outline color as six hexadecimal digits. Use `2277ff` or `%232277ff` (the URL-encoded form of `#2277ff`). Defaults to `#c69026` and does not change `layout=feed`. Invalid values return HTTP 400 with `borderColor must be a six-digit hex`.*
+- *`borderColor` (optional). Card outline color as six hexadecimal digits. Use `2277ff` or `%232277ff` (the URL-encoded form of `#2277ff`). Defaults to `#c69026` and does not change `layout=feed`. Invalid values return HTTP 400 with `borderColor must be a six-digit hex`.*
 
 ---
 <p align="center"><a href="https://github.com/SegoCode/StarCards/graphs/contributors">
