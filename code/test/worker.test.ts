@@ -630,7 +630,7 @@ describe("renderStars", () => {
 
         const svg = await renderStars([], 640, "card", "36393e");
 
-        expect(svg).toContain("stroke: #36393e; stroke-opacity: 1;");
+        expect(svg).toContain("stroke: #36393e; stroke-opacity: 1; stroke-width: 2;");
     });
 
     it("renders the feed sentence layout", async () => {
