@@ -26,6 +26,7 @@ export async function renderStars(
     stars: readonly Star[],
     width: number,
     layout: "card" | "feed" = "card",
+    borderColor = "c69026",
 ): Promise<string> {
     const height = stackHeight(stars.length, layout);
     const avatars = await Promise.all(stars.map(star => inlineAvatar(star.avatarUrl)));
@@ -55,7 +56,15 @@ export async function renderStars(
 
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
         <defs>
-            <style>${CARD_CSS}</style>
+            <style>
+                text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+                .card { fill: #f6f8fa; fill-opacity: .94; stroke: #${borderColor}; stroke-opacity: .4; }
+                .login { fill: #1f2328; }
+                .repo { fill: #9a6700; }
+                .time { fill: #59636e; }
+                .muted { fill: #656d76; }
+                .rule { stroke: #d8dee4; }
+            </style>
             <linearGradient id="fg" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0" stop-color="#fff"/>
                 <stop offset=".45" stop-color="#fff"/>
@@ -104,17 +113,6 @@ function ago(iso: string): string {
 function escapeXml(value: string): string {
     return value.replace(/[&<>"]/g, character => XML_ENTITIES[character] ?? character);
 }
-
-const CARD_CSS = `
-        text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-        .card { fill: #f6f8fa; fill-opacity: .94; stroke: #c69026; stroke-opacity: .4; }
-        .login { fill: #1f2328; }
-        .repo { fill: #9a6700; }
-        .time { fill: #59636e; }
-        .muted { fill: #656d76; }
-        .rule { stroke: #d8dee4; }
-    `;
-
 
 function card(
     star: Star,

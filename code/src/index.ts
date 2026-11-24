@@ -47,9 +47,19 @@ const worker = {
             });
         }
         const layout = layoutParam === "feed" ? "feed" : "card";
+        const borderColorParam = url.searchParams.get("borderColor");
+        if (borderColorParam !== null && !/^#?[0-9a-f]{6}$/i.test(borderColorParam)) {
+            return new Response("borderColor must be a six-digit hex color", {
+                status: 400,
+                headers: { "cache-control": "no-store" },
+            });
+        }
+        const borderColor = layout === "card"
+            ? borderColorParam?.replace(/^#/, "").toLowerCase()
+            : undefined;
         const debug = url.searchParams.get("debug") === "true";
         const cardCount = cardsParam === null ? CARD_COUNT : cards;
-        const key = liveKey(url, width, cardCount, layout);
+        const key = liveKey(url, width, cardCount, layout, borderColor);
 
         try {
             const run = await recentStars(cardCount);
@@ -66,7 +76,7 @@ const worker = {
                 return lastGood;
             }
 
-            const svg = await renderStars(run.stars, width, layout);
+            const svg = await renderStars(run.stars, width, layout, borderColor);
             const response = new Response(svg, {
                 headers: run.ok ? SVG_LIVE_HEADERS : SVG_SKIP_HEADERS,
             });
@@ -128,11 +138,15 @@ function liveKey(
     width: number,
     cards: number,
     layout: string,
+    borderColor: string | undefined,
 ): Request {
     const key = new URL(url.origin + url.pathname);
     key.searchParams.set("width", String(width));
     key.searchParams.set("cards", String(cards));
     key.searchParams.set("layout", layout);
+    if (borderColor !== undefined) {
+        key.searchParams.set("borderColor", borderColor);
+    }
     return new Request(key, { method: "GET" });
 }
 

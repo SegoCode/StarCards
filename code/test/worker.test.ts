@@ -51,6 +51,23 @@ describe("worker URL parameters", () => {
         );
     });
 
+    it.each(["", "abc", "blue", "#112233; fill: red"])(
+        "rejects an invalid borderColor (%j)",
+        async (color) => {
+            const response = await worker.fetch(
+                new Request(`https://starcards.example/?width=640&borderColor=${encodeURIComponent(color)}`),
+                undefined,
+                {} as ExecutionContext,
+            );
+
+            expect(response.status).toBe(400);
+            expect(response.headers.get("cache-control")).toBe("no-store");
+            await expect(response.text()).resolves.toBe(
+                "borderColor must be a six-digit hex color",
+            );
+        },
+    );
+
     it("renders only as many cards as the cards parameter", async () => {
         vi.stubGlobal("fetch", async (input: string | URL | Request) => {
             const url = input instanceof Request ? input.url : input.toString();
@@ -153,7 +170,7 @@ describe("worker URL parameters", () => {
         });
 
         const response = await worker.fetch(
-            new Request("https://starcards.example/?width=640&layout=feed"),
+            new Request("https://starcards.example/?width=640&layout=feed&borderColor=2277ff"),
             undefined,
             {} as ExecutionContext,
         );
@@ -163,6 +180,7 @@ describe("worker URL parameters", () => {
         expect(svg).toContain("starred");
         expect(svg).not.toContain('class="card"');
         expect(svg).toContain(">one</tspan>");
+        expect(svg).not.toContain("#2277ff");
     });
 
     it("returns JSON diagnostics when debug=true", async () => {
@@ -225,7 +243,7 @@ describe("worker URL parameters", () => {
         expect(body.cache).toEqual({ discarded: false, hasLastGood: false });
     });
 
-    it("serves the last good SVG when a later run hits GitHub 4xx", async () => {
+    it("serves the last good SVG for the requested border color after a GitHub error", async () => {
         const store = new Map<string, Response>();
         vi.stubGlobal("caches", {
             default: {
@@ -271,7 +289,7 @@ describe("worker URL parameters", () => {
             return new Response(null, { status: 404 });
         });
 
-        const live = new Request("https://starcards.example/?width=640");
+        const live = new Request("https://starcards.example/?width=640&borderColor=%232277FF");
         const first = await worker.fetch(
             live,
             undefined,
@@ -279,18 +297,27 @@ describe("worker URL parameters", () => {
         );
         const firstSvg = await first.text();
         expect(firstSvg).toContain(">one</text>");
+        expect(firstSvg).toMatch(/\.card \{[^}]*stroke: #2277ff;/);
         expect(first.headers.get("cloudflare-cdn-cache-control")).toBe(
             "max-age=3600",
         );
 
         alphaOk = false;
         const second = await worker.fetch(
-            new Request("https://starcards.example/?width=640"),
+            new Request("https://starcards.example/?width=640&borderColor=2277ff"),
             undefined,
             {} as ExecutionContext,
         );
         expect(second.headers.get("x-starcards-cache")).toBe("last-good");
         await expect(second.text()).resolves.toBe(firstSvg);
+
+        const differentColor = await worker.fetch(
+            new Request("https://starcards.example/?width=640&borderColor=ff7722"),
+            undefined,
+            {} as ExecutionContext,
+        );
+        expect(differentColor.headers.get("x-starcards-cache")).toBeNull();
+        await expect(differentColor.text()).resolves.not.toContain(">one</text>");
     });
 });
 
