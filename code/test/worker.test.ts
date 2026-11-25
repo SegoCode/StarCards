@@ -206,46 +206,69 @@ describe("worker URL parameters", () => {
     });
 
     it("returns JSON diagnostics when debug=true", async () => {
+        const resetSeconds = Math.ceil((Date.now() + 13.5 * 60_000) / 1000);
         vi.stubGlobal("fetch", async (input: string | URL | Request) => {
             const url = input instanceof Request ? input.url : input.toString();
 
             if (url.includes("/users/SegoCode/repos")) {
-                return Response.json([
+                return Response.json(
+                    [
+                        {
+                            fork: false,
+                            full_name: "SegoCode/alpha",
+                            name: "alpha",
+                            stargazers_count: 1,
+                            updated_at: isoDaysAgo(1),
+                        },
+                    ],
                     {
-                        fork: false,
-                        full_name: "SegoCode/alpha",
-                        name: "alpha",
-                        stargazers_count: 1,
-                        updated_at: isoDaysAgo(1),
+                        headers: {
+                            "x-ratelimit-remaining": "59",
+                            "x-ratelimit-reset": String(resetSeconds),
+                        },
                     },
-                ]);
+                );
             }
             if (url.includes("/repos/SegoCode/alpha/events")) {
-                return Response.json([
-                    {
-                        type: "WatchEvent",
-                        actor: {
-                            login: "one",
-                            avatar_url: "https://avatars.example/1",
+                return Response.json(
+                    [
+                        {
+                            type: "WatchEvent",
+                            actor: {
+                                login: "one",
+                                avatar_url: "https://avatars.example/1",
+                            },
+                            created_at: "2026-03-03T00:00:00Z",
                         },
-                        created_at: "2026-03-03T00:00:00Z",
+                    ],
+                    {
+                        headers: {
+                            "x-ratelimit-remaining": "58",
+                            "x-ratelimit-reset": String(resetSeconds),
+                        },
                     },
-                ]);
+                );
             }
 
             return new Response(null, { status: 404 });
         });
 
+        const request = new Request("https://starcards.example/?width=640&debug=true");
+        Object.defineProperty(request, "cf", { value: { colo: "MAD" } });
+
         const response = await worker.fetch(
-            new Request("https://starcards.example/?width=640&debug=true"),
+            request,
             undefined,
             {} as ExecutionContext,
         );
         const body = await response.json() as {
+            colo: string | null;
             ok: boolean;
             stars: Array<{ login: string; hoursAgo: number }>;
             raw: unknown[];
             repositories: Array<{ name: string; watchCount: number }>;
+            rateLimitRemaining: string | null;
+            rateLimitResetInMinutes: number | null;
         };
 
         expect(response.status).toBe(200);
@@ -254,6 +277,7 @@ describe("worker URL parameters", () => {
         );
         expect(response.headers.get("cache-control")).toBe("no-store");
         expect(response.headers.get("cloudflare-cdn-cache-control")).toBeNull();
+        expect(body.colo).toBe("MAD");
         expect(body.ok).toBe(true);
         expect(body.stars[0]?.login).toBe("one");
         expect(body.stars[0]?.hoursAgo).toEqual(expect.any(Number));
@@ -261,6 +285,56 @@ describe("worker URL parameters", () => {
         expect(body.repositories[0]).toEqual(
             expect.objectContaining({ name: "alpha", watchCount: 1 }),
         );
+        expect(body.rateLimitRemaining).toBe("58");
+        expect(body.rateLimitResetInMinutes).toBe(14);
+    });
+
+    it("surfaces colo and rate-limit reset minutes in debug=true when repo listing returns 403, while still returning 503 for SVG requests", async () => {
+        const resetSeconds = Math.ceil((Date.now() + 13.5 * 60_000) / 1000);
+        vi.stubGlobal("fetch", async () =>
+            new Response("rate limited", {
+                status: 403,
+                headers: {
+                    "x-ratelimit-remaining": "0",
+                    "x-ratelimit-reset": String(resetSeconds),
+                },
+            }),
+        );
+
+        const debugRequest = new Request("https://starcards.example/?width=640&debug=true");
+        Object.defineProperty(debugRequest, "cf", { value: { colo: "MAD" } });
+
+        const debugResponse = await worker.fetch(
+            debugRequest,
+            undefined,
+            {} as ExecutionContext,
+        );
+        const body = await debugResponse.json() as {
+            colo: string | null;
+            ok: boolean;
+            errors: Array<{ status?: number; message: string }>;
+            rateLimitRemaining: string | null;
+            rateLimitResetInMinutes: number | null;
+        };
+
+        expect(debugResponse.status).toBe(200);
+        expect(body.colo).toBe("MAD");
+        expect(body.ok).toBe(false);
+        expect(body.rateLimitRemaining).toBe("0");
+        expect(body.rateLimitResetInMinutes).toBe(14);
+        expect(body.errors[0]).toEqual(
+            expect.objectContaining({
+                status: 403,
+                message: "GitHub API returned 403",
+            }),
+        );
+
+        const svgResponse = await worker.fetch(
+            new Request("https://starcards.example/?width=640"),
+            undefined,
+            {} as ExecutionContext,
+        );
+        expect(svgResponse.status).toBe(503);
     });
 
     it("returns 503 on total GitHub failure to trigger Workers Cache stale-if-error, and uncacheable partial SVG when stars remain", async () => {
