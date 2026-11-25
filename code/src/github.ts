@@ -5,7 +5,7 @@ const GITHUB_HEADERS = {
 };
 
 const EVENTS_WINDOW_MS = 35 * 24 * 60 * 60 * 1000;
-const BATCH_SIZE = 3;
+const BATCH_SIZE = 2;
 const MAX_REPO_SCANS = 20;
 
 interface GitHubRepository {
@@ -108,15 +108,17 @@ export async function recentStars(limit: number): Promise<StarRun> {
     let ranked: Star[] = [];
 
     let offset = 0;
+    let provenComplete = false;
     while (offset < candidates.length) {
         if (ranked.length >= limit) {
             const kthStarMs = Date.parse(ranked[limit - 1]!.starredAt);
             const nextRepoUpdatedMs = candidates[offset]!.updatedAtMs;
             if (kthStarMs >= nextRepoUpdatedMs) {
+                provenComplete = true;
                 break;
             }
         }
-        const size = offset === 0 && limit === 1
+        const size = offset === 0
             ? 1
             : Math.min(BATCH_SIZE, candidates.length - offset);
         const batch = candidates.slice(offset, offset + size);
@@ -131,12 +133,22 @@ export async function recentStars(limit: number): Promise<StarRun> {
             .filter(star => star.login.toLowerCase() !== ownerName)
             .sort((left, right) => right.starredAt.localeCompare(left.starredAt));
     }
+    if (offset >= candidates.length) {
+        provenComplete = true;
+    }
 
+    const kthStarMs = ranked.length >= limit ? Date.parse(ranked[limit - 1]!.starredAt) : -Infinity;
     const errors = fetches.flatMap(fetch => fetch.errors);
+    const blockingErrors = provenComplete
+        ? errors.filter(error => {
+            const failedRepo = candidates.find(repo => repo.name === error.repository);
+            return failedRepo === undefined || failedRepo.updatedAtMs > kthStarMs;
+        })
+        : errors;
     const droppedOwnerStars = raw.filter(star => star.login.toLowerCase() === ownerName);
 
     return {
-        ok: errors.length === 0,
+        ok: blockingErrors.length === 0,
         owner: OWNER,
         fetchedAt: new Date().toISOString(),
         limit,
