@@ -4,13 +4,18 @@ const GITHUB_HEADERS = {
     accept: "application/vnd.github+json",
 };
 
+const EVENTS_WINDOW_MS = 35 * 24 * 60 * 60 * 1000;
+const BATCH_SIZE = 3;
+const MAX_REPO_SCANS = 20;
+
 interface GitHubRepository {
     fork: boolean;
     fullName: string;
     name: string;
     starCount: number;
+    updatedAt: string;
+    updatedAtMs: number;
 }
-
 interface GitHubEvent {
     type: string;
     login: string;
@@ -36,13 +41,13 @@ export interface RepoFetch {
     name: string;
     fullName: string;
     starCount: number;
+    updatedAt: string;
     status: number;
     eventCount: number;
     watchCount: number;
     ms: number;
     error?: string;
 }
-
 export interface StarRun {
     ok: boolean;
     owner: string;
@@ -52,13 +57,13 @@ export interface StarRun {
     raw: Star[];
     droppedOwnerStars: Star[];
     repositories: RepoFetch[];
-    ignored: { forks: number; noStars: number; unparsed: number };
+    ignored: { forks: number; noStars: number; stale: number; unparsed: number };
     errors: RunError[];
     rateLimitRemaining: string | null;
 }
 
 export async function recentStars(limit: number): Promise<StarRun> {
-    const reposPath = `/users/${OWNER}/repos?per_page=100&type=owner`;
+    const reposPath = `/users/${OWNER}/repos?per_page=100&type=owner&sort=updated&direction=desc`;
     const listed = await githubJson(reposPath);
     if (!listed.ok) {
         throw new Error(listed.message);
@@ -67,8 +72,10 @@ export async function recentStars(limit: number): Promise<StarRun> {
         throw new Error("GitHub repository response is not an array");
     }
 
+    const cutoffMs = Date.now() - EVENTS_WINDOW_MS;
     let forks = 0;
     let noStars = 0;
+    let stale = 0;
     let unparsed = 0;
     const repositories: GitHubRepository[] = [];
     for (const value of listed.data) {
@@ -85,20 +92,48 @@ export async function recentStars(limit: number): Promise<StarRun> {
             noStars += 1;
             continue;
         }
+        if (repository.updatedAtMs < cutoffMs) {
+            stale += 1;
+            continue;
+        }
         repositories.push(repository);
     }
 
-    repositories.sort((left, right) => right.starCount - left.starCount);
-    const fetches = await Promise.all(
-        repositories.slice(0, Math.max(limit, 3)).map(watchEvents),
-    );
-    const errors = fetches.flatMap(fetch => fetch.errors);
-    const raw = fetches.flatMap(fetch => fetch.stars);
+    repositories.sort((left, right) => right.updatedAtMs - left.updatedAtMs);
+
+    const candidates = repositories.slice(0, MAX_REPO_SCANS);
     const ownerName = OWNER.toLowerCase();
+    const fetches: RepoWatch[] = [];
+    const raw: Star[] = [];
+    let ranked: Star[] = [];
+
+    let offset = 0;
+    while (offset < candidates.length) {
+        if (ranked.length >= limit) {
+            const kthStarMs = Date.parse(ranked[limit - 1]!.starredAt);
+            const nextRepoUpdatedMs = candidates[offset]!.updatedAtMs;
+            if (kthStarMs >= nextRepoUpdatedMs) {
+                break;
+            }
+        }
+        const size = offset === 0 && limit === 1
+            ? 1
+            : Math.min(BATCH_SIZE, candidates.length - offset);
+        const batch = candidates.slice(offset, offset + size);
+        offset += size;
+
+        const results = await Promise.all(batch.map(watchEvents));
+        fetches.push(...results);
+        for (const result of results) {
+            raw.push(...result.stars);
+        }
+        ranked = raw
+            .filter(star => star.login.toLowerCase() !== ownerName)
+            .sort((left, right) => right.starredAt.localeCompare(left.starredAt));
+    }
+
+    const errors = fetches.flatMap(fetch => fetch.errors);
     const droppedOwnerStars = raw.filter(star => star.login.toLowerCase() === ownerName);
-    const ranked = raw
-        .filter(star => star.login.toLowerCase() !== ownerName)
-        .sort((left, right) => right.starredAt.localeCompare(left.starredAt));
 
     return {
         ok: errors.length === 0,
@@ -109,7 +144,7 @@ export async function recentStars(limit: number): Promise<StarRun> {
         raw,
         droppedOwnerStars,
         repositories: fetches.map(fetch => fetch.repository),
-        ignored: { forks, noStars, unparsed },
+        ignored: { forks, noStars, stale, unparsed },
         errors,
         rateLimitRemaining: fetches.reduce(
             (remaining, fetch) => fetch.rateLimitRemaining ?? remaining,
@@ -137,6 +172,7 @@ async function watchEvents(repository: GitHubRepository): Promise<RepoWatch> {
                     name: repository.name,
                     fullName: repository.fullName,
                     starCount: repository.starCount,
+                    updatedAt: repository.updatedAt,
                     status: payload.status,
                     eventCount: 0,
                     watchCount: 0,
@@ -160,6 +196,7 @@ async function watchEvents(repository: GitHubRepository): Promise<RepoWatch> {
                     name: repository.name,
                     fullName: repository.fullName,
                     starCount: repository.starCount,
+                    updatedAt: repository.updatedAt,
                     status: payload.status,
                     eventCount: 0,
                     watchCount: 0,
@@ -189,6 +226,7 @@ async function watchEvents(repository: GitHubRepository): Promise<RepoWatch> {
                 name: repository.name,
                 fullName: repository.fullName,
                 starCount: repository.starCount,
+                updatedAt: repository.updatedAt,
                 status: payload.status,
                 eventCount: payload.data.length,
                 watchCount: stars.length,
@@ -205,6 +243,7 @@ async function watchEvents(repository: GitHubRepository): Promise<RepoWatch> {
                 name: repository.name,
                 fullName: repository.fullName,
                 starCount: repository.starCount,
+                updatedAt: repository.updatedAt,
                 status: 0,
                 eventCount: 0,
                 watchCount: 0,
@@ -229,14 +268,6 @@ interface GitHubJson {
 async function githubJson(path: string): Promise<GitHubJson> {
     const response = await fetch(`https://api.github.com${path}`, {
         headers: GITHUB_HEADERS,
-        cf: {
-            cacheTtl: 3600,
-            cacheEverything: true,
-            cacheTtlByStatus: {
-                "200-299": 3600,
-                "400-599": 0,
-            },
-        },
     });
     const rateLimitRemaining = response.headers.get("x-ratelimit-remaining");
     if (!response.ok) {
@@ -264,22 +295,34 @@ function parseRepository(value: unknown): GitHubRepository | null {
         !("fork" in value) ||
         !("full_name" in value) ||
         !("name" in value) ||
-        !("stargazers_count" in value)
+        !("stargazers_count" in value) ||
+        !("updated_at" in value)
     ) {
         return null;
     }
 
-    const { fork, full_name: fullName, name, stargazers_count: starCount } = value;
+    const {
+        fork,
+        full_name: fullName,
+        name,
+        stargazers_count: starCount,
+        updated_at: updatedAt,
+    } = value;
     if (
         typeof fork !== "boolean" ||
         typeof fullName !== "string" ||
         typeof name !== "string" ||
-        typeof starCount !== "number"
+        typeof starCount !== "number" ||
+        typeof updatedAt !== "string"
     ) {
         return null;
     }
+    const updatedAtMs = Date.parse(updatedAt);
+    if (!Number.isFinite(updatedAtMs)) {
+        return null;
+    }
 
-    return { fork, fullName, name, starCount };
+    return { fork, fullName, name, starCount, updatedAt, updatedAtMs };
 }
 
 function parseEvent(value: unknown): GitHubEvent | null {
