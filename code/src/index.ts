@@ -1,7 +1,8 @@
 import { OWNER, recentStars, type Star, type StarRun } from "./github";
-import { renderStars, stackHeight } from "./svg";
+import { renderStars } from "./svg";
 
 const CARD_COUNT = 3;
+const MAX_CARDS = 10;
 
 const worker = {
     async fetch(
@@ -9,7 +10,20 @@ const worker = {
         _env: unknown,
         _context: ExecutionContext,
     ): Promise<Response> {
+        if (request.method !== "GET" && request.method !== "HEAD") {
+            return new Response("method not allowed", {
+                status: 405,
+                headers: { allow: "GET, HEAD", "cache-control": "no-store" },
+            });
+        }
         const url = new URL(request.url);
+        if (url.pathname !== "/") {
+            return new Response("not found", {
+                status: 404,
+                headers: { "cache-control": "no-store" },
+            });
+        }
+
         const widthParam = url.searchParams.get("width");
         const width = Number(widthParam);
         if (
@@ -27,14 +41,13 @@ const worker = {
         const cards = Number(cardsParam);
         if (
             cardsParam !== null &&
-            (!/^[1-9]\d*$/.test(cardsParam) || !Number.isSafeInteger(cards))
+            (!/^[1-9]\d*$/.test(cardsParam) || !Number.isSafeInteger(cards) || cards > MAX_CARDS)
         ) {
-            return new Response("cards must be a positive integer", {
+            return new Response(`cards must be an integer between 1 and ${MAX_CARDS}`, {
                 status: 400,
                 headers: { "cache-control": "no-store" },
             });
         }
-
         const layoutParam = url.searchParams.get("layout");
         if (
             layoutParam !== null &&
@@ -59,63 +72,46 @@ const worker = {
             : undefined;
         const debug = url.searchParams.get("debug") === "true";
         const cardCount = cardsParam === null ? CARD_COUNT : cards;
-        const key = liveKey(url, width, cardCount, layout, borderColor);
-
         try {
             const run = await recentStars(cardCount);
-            const cached = await matchLastGood(key);
             if (debug) {
-                return debugJson(run, {
-                    discarded: !run.ok,
-                    hasLastGood: cached !== undefined,
-                });
+                return debugJson(run);
             }
-            if (!run.ok && cached !== undefined) {
-                const lastGood = new Response(cached.body, cached);
-                lastGood.headers.set("x-starcards-cache", "last-good");
-                return lastGood;
+
+            if (!run.ok && run.stars.length === 0) {
+                return new Response("upstream unavailable", {
+                    status: 503,
+                    headers: { "cache-control": "no-store" },
+                });
             }
 
             const svg = await renderStars(run.stars, width, layout, borderColor);
-            const response = new Response(svg, {
-                headers: run.ok ? SVG_LIVE_HEADERS : SVG_SKIP_HEADERS,
+            return new Response(svg, {
+                headers: run.ok ? SVG_LIVE_HEADERS : SVG_PARTIAL_HEADERS,
             });
-            if (run.ok) {
-                await putLastGood(key, response.clone());
-            }
-            return response;
         } catch (error) {
-            const cached = await matchLastGood(key);
             if (debug) {
-                return debugJson(
-                    {
-                        ok: false,
-                        owner: OWNER,
-                        fetchedAt: new Date().toISOString(),
-                        limit: cardCount,
-                        stars: [],
-                        raw: [],
-                        droppedOwnerStars: [],
-                        repositories: [],
-                        ignored: { forks: 0, noStars: 0, unparsed: 0 },
-                        errors: [{
-                            path: "",
-                            message: error instanceof Error ? error.message : "unknown error",
-                        }],
-                        rateLimitRemaining: null,
-                    },
-                    { discarded: true, hasLastGood: cached !== undefined },
-                );
+                return debugJson({
+                    ok: false,
+                    owner: OWNER,
+                    fetchedAt: new Date().toISOString(),
+                    limit: cardCount,
+                    stars: [],
+                    raw: [],
+                    droppedOwnerStars: [],
+                    repositories: [],
+                    ignored: { forks: 0, noStars: 0, stale: 0, unparsed: 0 },
+                    errors: [{
+                        path: "",
+                        message: error instanceof Error ? error.message : "unknown error",
+                    }],
+                    rateLimitRemaining: null,
+                });
             }
-            if (cached !== undefined) {
-                const lastGood = new Response(cached.body, cached);
-                lastGood.headers.set("x-starcards-cache", "last-good");
-                return lastGood;
-            }
-            return new Response(
-                `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${stackHeight(cardCount, layout)}"/>`,
-                { headers: SVG_SKIP_HEADERS },
-            );
+            return new Response("upstream unavailable", {
+                status: 503,
+                headers: { "cache-control": "no-store" },
+            });
         }
     },
 } satisfies ExportedHandler;
@@ -125,53 +121,13 @@ export default worker;
 const SVG_LIVE_HEADERS = {
     "content-type": "image/svg+xml; charset=utf-8",
     "cache-control": "no-store",
-    "cloudflare-cdn-cache-control": "max-age=3600",
+    "cloudflare-cdn-cache-control": "public, max-age=3600, stale-while-revalidate=3600, stale-if-error=86400",
 };
 
-const SVG_SKIP_HEADERS = {
+const SVG_PARTIAL_HEADERS = {
     "content-type": "image/svg+xml; charset=utf-8",
     "cache-control": "no-store",
 };
-
-function liveKey(
-    url: URL,
-    width: number,
-    cards: number,
-    layout: string,
-    borderColor: string | undefined,
-): Request {
-    const key = new URL(url.origin + url.pathname);
-    key.searchParams.set("width", String(width));
-    key.searchParams.set("cards", String(cards));
-    key.searchParams.set("layout", layout);
-    if (borderColor !== undefined) {
-        key.searchParams.set("borderColor", borderColor);
-    }
-    return new Request(key, { method: "GET" });
-}
-
-async function matchLastGood(key: Request): Promise<Response | undefined> {
-    if (typeof caches === "undefined") {
-        return undefined;
-    }
-    try {
-        return await caches.default.match(key);
-    } catch {
-        return undefined;
-    }
-}
-
-async function putLastGood(key: Request, response: Response): Promise<void> {
-    if (typeof caches === "undefined") {
-        return;
-    }
-    try {
-        await caches.default.put(key, response);
-    } catch {
-        return;
-    }
-}
-
 function withAge(star: Star): Star & { hoursAgo: number } {
     return {
         ...star,
@@ -179,10 +135,7 @@ function withAge(star: Star): Star & { hoursAgo: number } {
     };
 }
 
-function debugJson(
-    run: StarRun,
-    cache: { discarded: boolean; hasLastGood: boolean },
-): Response {
+function debugJson(run: StarRun): Response {
     return new Response(
         JSON.stringify(
             {
@@ -197,7 +150,6 @@ function debugJson(
                 ignored: run.ignored,
                 errors: run.errors,
                 rateLimitRemaining: run.rateLimitRemaining,
-                cache,
             },
             null,
             2,
