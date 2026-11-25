@@ -60,18 +60,39 @@ export interface StarRun {
     ignored: { forks: number; noStars: number; stale: number; unparsed: number };
     errors: RunError[];
     rateLimitRemaining: string | null;
+    rateLimitResetInMinutes: number | null;
+}
+
+interface RateLimitState {
+    remaining: string | null;
+    resetInMinutes: number | null;
 }
 
 export async function recentStars(limit: number): Promise<StarRun> {
+    const rateLimit: RateLimitState = { remaining: null, resetInMinutes: null };
     const reposPath = `/users/${OWNER}/repos?per_page=100&type=owner&sort=updated&direction=desc`;
-    const listed = await githubJson(reposPath);
-    if (!listed.ok) {
-        throw new Error(listed.message);
+    const listed = await githubJson(reposPath, rateLimit);
+    if (!listed.ok || !Array.isArray(listed.data)) {
+        const message = !listed.ok ? listed.message : "GitHub repository response is not an array";
+        return {
+            ok: false,
+            owner: OWNER,
+            fetchedAt: new Date().toISOString(),
+            limit,
+            stars: [],
+            raw: [],
+            droppedOwnerStars: [],
+            repositories: [],
+            ignored: { forks: 0, noStars: 0, stale: 0, unparsed: 0 },
+            errors: [{
+                path: reposPath,
+                ...(listed.status > 0 ? { status: listed.status } : {}),
+                message,
+            }],
+            rateLimitRemaining: rateLimit.remaining,
+            rateLimitResetInMinutes: rateLimit.resetInMinutes,
+        };
     }
-    if (!Array.isArray(listed.data)) {
-        throw new Error("GitHub repository response is not an array");
-    }
-
     const cutoffMs = Date.now() - EVENTS_WINDOW_MS;
     let forks = 0;
     let noStars = 0;
@@ -124,7 +145,7 @@ export async function recentStars(limit: number): Promise<StarRun> {
         const batch = candidates.slice(offset, offset + size);
         offset += size;
 
-        const results = await Promise.all(batch.map(watchEvents));
+        const results = await Promise.all(batch.map(repo => watchEvents(repo, rateLimit)));
         fetches.push(...results);
         for (const result of results) {
             raw.push(...result.stars);
@@ -158,10 +179,8 @@ export async function recentStars(limit: number): Promise<StarRun> {
         repositories: fetches.map(fetch => fetch.repository),
         ignored: { forks, noStars, stale, unparsed },
         errors,
-        rateLimitRemaining: fetches.reduce(
-            (remaining, fetch) => fetch.rateLimitRemaining ?? remaining,
-            listed.rateLimitRemaining,
-        ),
+        rateLimitRemaining: rateLimit.remaining,
+        rateLimitResetInMinutes: rateLimit.resetInMinutes,
     };
 }
 
@@ -169,70 +188,19 @@ interface RepoWatch {
     repository: RepoFetch;
     stars: Star[];
     errors: RunError[];
-    rateLimitRemaining: string | null;
 }
 
-async function watchEvents(repository: GitHubRepository): Promise<RepoWatch> {
+async function watchEvents(
+    repository: GitHubRepository,
+    rateLimit: RateLimitState,
+): Promise<RepoWatch> {
     const path = `/repos/${repository.fullName}/events?per_page=100`;
     const started = Date.now();
-    try {
-        const payload = await githubJson(path);
-        const ms = Date.now() - started;
-        if (!payload.ok) {
-            return {
-                repository: {
-                    name: repository.name,
-                    fullName: repository.fullName,
-                    starCount: repository.starCount,
-                    updatedAt: repository.updatedAt,
-                    status: payload.status,
-                    eventCount: 0,
-                    watchCount: 0,
-                    ms,
-                    error: payload.message,
-                },
-                stars: [],
-                errors: [{
-                    path,
-                    repository: repository.name,
-                    status: payload.status,
-                    message: payload.message,
-                }],
-                rateLimitRemaining: payload.rateLimitRemaining,
-            };
-        }
-        if (!Array.isArray(payload.data)) {
-            const message = "GitHub events response is not an array";
-            return {
-                repository: {
-                    name: repository.name,
-                    fullName: repository.fullName,
-                    starCount: repository.starCount,
-                    updatedAt: repository.updatedAt,
-                    status: payload.status,
-                    eventCount: 0,
-                    watchCount: 0,
-                    ms,
-                    error: message,
-                },
-                stars: [],
-                errors: [{ path, repository: repository.name, status: payload.status, message }],
-                rateLimitRemaining: payload.rateLimitRemaining,
-            };
-        }
+    const payload = await githubJson(path, rateLimit);
+    const ms = Date.now() - started;
 
-        const stars = payload.data
-            .map(parseEvent)
-            .filter((event): event is GitHubEvent =>
-                event !== null && event.type === "WatchEvent",
-            )
-            .map(event => ({
-                login: event.login,
-                avatarUrl: event.avatarUrl,
-                repository: repository.name,
-                starredAt: event.createdAt,
-            }));
-
+    if (!payload.ok || !Array.isArray(payload.data)) {
+        const message = !payload.ok ? payload.message : "GitHub events response is not an array";
         return {
             repository: {
                 name: repository.name,
@@ -240,64 +208,97 @@ async function watchEvents(repository: GitHubRepository): Promise<RepoWatch> {
                 starCount: repository.starCount,
                 updatedAt: repository.updatedAt,
                 status: payload.status,
-                eventCount: payload.data.length,
-                watchCount: stars.length,
-                ms,
-            },
-            stars,
-            errors: [],
-            rateLimitRemaining: payload.rateLimitRemaining,
-        };
-    } catch (error) {
-        const message = error instanceof Error ? error.message : "unknown error";
-        return {
-            repository: {
-                name: repository.name,
-                fullName: repository.fullName,
-                starCount: repository.starCount,
-                updatedAt: repository.updatedAt,
-                status: 0,
                 eventCount: 0,
                 watchCount: 0,
-                ms: Date.now() - started,
+                ms,
                 error: message,
             },
             stars: [],
-            errors: [{ path, repository: repository.name, message }],
-            rateLimitRemaining: null,
+            errors: [{
+                path,
+                repository: repository.name,
+                ...(payload.status > 0 ? { status: payload.status } : {}),
+                message,
+            }],
         };
     }
+
+    const stars = payload.data
+        .map(parseEvent)
+        .filter((event): event is GitHubEvent =>
+            event !== null && event.type === "WatchEvent",
+        )
+        .map(event => ({
+            login: event.login,
+            avatarUrl: event.avatarUrl,
+            repository: repository.name,
+            starredAt: event.createdAt,
+        }));
+
+    return {
+        repository: {
+            name: repository.name,
+            fullName: repository.fullName,
+            starCount: repository.starCount,
+            updatedAt: repository.updatedAt,
+            status: payload.status,
+            eventCount: payload.data.length,
+            watchCount: stars.length,
+            ms,
+        },
+        stars,
+        errors: [],
+    };
 }
 
 interface GitHubJson {
     ok: boolean;
     status: number;
     data: unknown;
-    rateLimitRemaining: string | null;
     message: string;
 }
 
-async function githubJson(path: string): Promise<GitHubJson> {
-    const response = await fetch(`https://api.github.com${path}`, {
-        headers: GITHUB_HEADERS,
-    });
-    const rateLimitRemaining = response.headers.get("x-ratelimit-remaining");
-    if (!response.ok) {
+async function githubJson(path: string, rateLimit: RateLimitState): Promise<GitHubJson> {
+    try {
+        const response = await fetch(`https://api.github.com${path}`, {
+            headers: GITHUB_HEADERS,
+        });
+        const remaining = response.headers.get("x-ratelimit-remaining");
+        if (
+            remaining !== null &&
+            (rateLimit.remaining === null || Number(remaining) < Number(rateLimit.remaining))
+        ) {
+            rateLimit.remaining = remaining;
+        }
+        const reset = response.headers.get("x-ratelimit-reset");
+        if (reset !== null && /^\d+$/.test(reset.trim())) {
+            rateLimit.resetInMinutes = Math.max(
+                0,
+                Math.ceil((Number(reset) * 1000 - Date.now()) / 60_000),
+            );
+        }
+        if (!response.ok) {
+            return {
+                ok: false,
+                status: response.status,
+                data: null,
+                message: `GitHub API returned ${response.status}`,
+            };
+        }
+        return {
+            ok: true,
+            status: response.status,
+            data: await response.json(),
+            message: "",
+        };
+    } catch (error) {
         return {
             ok: false,
-            status: response.status,
+            status: 0,
             data: null,
-            rateLimitRemaining,
-            message: `GitHub API returned ${response.status}`,
+            message: error instanceof Error ? error.message : "unknown error",
         };
     }
-    return {
-        ok: true,
-        status: response.status,
-        data: await response.json(),
-        rateLimitRemaining,
-        message: "",
-    };
 }
 
 function parseRepository(value: unknown): GitHubRepository | null {
