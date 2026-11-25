@@ -1,4 +1,4 @@
-import { OWNER, recentStars, type Star, type StarRun } from "./github";
+import { recentStars, type Star, type StarRun } from "./github";
 import { renderStars } from "./svg";
 
 const CARD_COUNT = 3;
@@ -72,47 +72,22 @@ const worker = {
             : undefined;
         const debug = url.searchParams.get("debug") === "true";
         const cardCount = cardsParam === null ? CARD_COUNT : cards;
-        try {
-            const run = await recentStars(cardCount);
-            if (debug) {
-                return debugJson(run);
-            }
-
-            if (!run.ok && run.stars.length === 0) {
-                return new Response("upstream unavailable", {
-                    status: 503,
-                    headers: { "cache-control": "no-store" },
-                });
-            }
-
-            const svg = await renderStars(run.stars, width, layout, borderColor);
-            return new Response(svg, {
-                headers: run.ok ? SVG_LIVE_HEADERS : SVG_PARTIAL_HEADERS,
-            });
-        } catch (error) {
-            if (debug) {
-                return debugJson({
-                    ok: false,
-                    owner: OWNER,
-                    fetchedAt: new Date().toISOString(),
-                    limit: cardCount,
-                    stars: [],
-                    raw: [],
-                    droppedOwnerStars: [],
-                    repositories: [],
-                    ignored: { forks: 0, noStars: 0, stale: 0, unparsed: 0 },
-                    errors: [{
-                        path: "",
-                        message: error instanceof Error ? error.message : "unknown error",
-                    }],
-                    rateLimitRemaining: null,
-                });
-            }
+        const colo = typeof request.cf?.colo === "string" ? request.cf.colo : null;
+        const run = await recentStars(cardCount);
+        if (debug) {
+            return debugJson(run, colo);
+        }
+        if (!run.ok && run.stars.length === 0) {
             return new Response("upstream unavailable", {
                 status: 503,
                 headers: { "cache-control": "no-store" },
             });
         }
+
+        const svg = await renderStars(run.stars, width, layout, borderColor);
+        return new Response(svg, {
+            headers: run.ok ? SVG_LIVE_HEADERS : SVG_PARTIAL_HEADERS,
+        });
     },
 } satisfies ExportedHandler;
 
@@ -135,10 +110,11 @@ function withAge(star: Star): Star & { hoursAgo: number } {
     };
 }
 
-function debugJson(run: StarRun): Response {
+function debugJson(run: StarRun, colo: string | null): Response {
     return new Response(
         JSON.stringify(
             {
+                colo,
                 ok: run.ok,
                 owner: run.owner,
                 fetchedAt: run.fetchedAt,
@@ -150,6 +126,7 @@ function debugJson(run: StarRun): Response {
                 ignored: run.ignored,
                 errors: run.errors,
                 rateLimitRemaining: run.rateLimitRemaining,
+                rateLimitResetInMinutes: run.rateLimitResetInMinutes,
             },
             null,
             2,
