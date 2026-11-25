@@ -6,7 +6,7 @@ const CARD_BODY_HEIGHT = 48;
 const FEED_TOP = 2;
 const FEED_ROW = 44;
 
-export function stackHeight(
+function stackHeight(
     cardCount: number,
     layout: "card" | "feed" = "card",
 ): number {
@@ -81,11 +81,21 @@ export async function renderStars(
 }
 
 
+function sizedAvatarUrl(raw: string): string {
+    try {
+        const parsed = new URL(raw);
+        if (!parsed.searchParams.has("s") && !parsed.searchParams.has("size")) {
+            parsed.searchParams.set("s", "80");
+        }
+        return parsed.toString();
+    } catch {
+        return raw;
+    }
+}
+
 async function inlineAvatar(url: string): Promise<string> {
     try {
-        const response = await fetch(url, {
-            cf: { cacheTtl: 3600, cacheEverything: true },
-        });
+        const response = await fetch(sizedAvatarUrl(url));
         if (!response.ok) {
             return "";
         }
