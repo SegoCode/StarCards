@@ -8,7 +8,29 @@ afterEach(() => {
     vi.unstubAllGlobals();
 });
 
+const isoDaysAgo = (days: number): string =>
+    new Date(Date.now() - days * 86_400_000).toISOString();
+
 describe("worker URL parameters", () => {
+    it("rejects non-GET/HEAD methods and non-root paths", async () => {
+        const post = await worker.fetch(
+            new Request("https://starcards.example/?width=640", { method: "POST" }),
+            undefined,
+            {} as ExecutionContext,
+        );
+        expect(post.status).toBe(405);
+        expect(post.headers.get("allow")).toBe("GET, HEAD");
+        expect(post.headers.get("cache-control")).toBe("no-store");
+
+        const icon = await worker.fetch(
+            new Request("https://starcards.example/favicon.ico"),
+            undefined,
+            {} as ExecutionContext,
+        );
+        expect(icon.status).toBe(404);
+        expect(icon.headers.get("cache-control")).toBe("no-store");
+    });
+
     it("requires a positive width parameter", async () => {
         const response = await worker.fetch(
             new Request("https://starcards.example/?width=0"),
@@ -24,16 +46,16 @@ describe("worker URL parameters", () => {
         );
     });
 
-    it("rejects a non-positive cards parameter", async () => {
+    it.each(["0", "-1", "11", "500"])("rejects an out-of-range cards parameter (%s)", async (cards) => {
         const response = await worker.fetch(
-            new Request("https://starcards.example/?width=640&cards=0"),
+            new Request(`https://starcards.example/?width=640&cards=${cards}`),
             undefined,
             {} as ExecutionContext,
         );
 
         expect(response.status).toBe(400);
         await expect(response.text()).resolves.toBe(
-            "cards must be a positive integer",
+            "cards must be an integer between 1 and 10",
         );
     });
 
@@ -79,10 +101,10 @@ describe("worker URL parameters", () => {
                         full_name: "SegoCode/alpha",
                         name: "alpha",
                         stargazers_count: 3,
+                        updated_at: isoDaysAgo(1),
                     },
                 ]);
             }
-
             if (url.includes("/repos/SegoCode/alpha/events")) {
                 return Response.json([
                     {
@@ -127,7 +149,7 @@ describe("worker URL parameters", () => {
         expect(response.status).toBe(200);
         expect(response.headers.get("cache-control")).toBe("no-store");
         expect(response.headers.get("cloudflare-cdn-cache-control")).toBe(
-            "max-age=3600",
+            "public, max-age=3600, stale-while-revalidate=3600, stale-if-error=86400",
         );
         expect(svg.match(/class="card"/g)).toHaveLength(2);
         expect(svg).toContain('width="640"');
@@ -149,10 +171,10 @@ describe("worker URL parameters", () => {
                         full_name: "SegoCode/alpha",
                         name: "alpha",
                         stargazers_count: 1,
+                        updated_at: isoDaysAgo(1),
                     },
                 ]);
             }
-
             if (url.includes("/repos/SegoCode/alpha/events")) {
                 return Response.json([
                     {
@@ -194,10 +216,10 @@ describe("worker URL parameters", () => {
                         full_name: "SegoCode/alpha",
                         name: "alpha",
                         stargazers_count: 1,
+                        updated_at: isoDaysAgo(1),
                     },
                 ]);
             }
-
             if (url.includes("/repos/SegoCode/alpha/events")) {
                 return Response.json([
                     {
@@ -224,7 +246,6 @@ describe("worker URL parameters", () => {
             stars: Array<{ login: string; hoursAgo: number }>;
             raw: unknown[];
             repositories: Array<{ name: string; watchCount: number }>;
-            cache: { discarded: boolean; hasLastGood: boolean };
         };
 
         expect(response.status).toBe(200);
@@ -240,22 +261,10 @@ describe("worker URL parameters", () => {
         expect(body.repositories[0]).toEqual(
             expect.objectContaining({ name: "alpha", watchCount: 1 }),
         );
-        expect(body.cache).toEqual({ discarded: false, hasLastGood: false });
     });
 
-    it("serves the last good SVG for the requested border color after a GitHub error", async () => {
-        const store = new Map<string, Response>();
-        vi.stubGlobal("caches", {
-            default: {
-                match: async (request: Request) =>
-                    store.get(new URL(request.url).toString())?.clone(),
-                put: async (request: Request, response: Response) => {
-                    store.set(new URL(request.url).toString(), response.clone());
-                },
-            },
-        });
-
-        let alphaOk = true;
+    it("returns 503 on total GitHub failure to trigger Workers Cache stale-if-error, and uncacheable partial SVG when stars remain", async () => {
+        let betaOk = true;
         vi.stubGlobal("fetch", async (input: string | URL | Request) => {
             const url = input instanceof Request ? input.url : input.toString();
 
@@ -266,22 +275,32 @@ describe("worker URL parameters", () => {
                         full_name: "SegoCode/alpha",
                         name: "alpha",
                         stargazers_count: 1,
+                        updated_at: isoDaysAgo(1),
+                    },
+                    {
+                        fork: false,
+                        full_name: "SegoCode/beta",
+                        name: "beta",
+                        stargazers_count: 1,
+                        updated_at: isoDaysAgo(2),
                     },
                 ]);
             }
-
             if (url.includes("/repos/SegoCode/alpha/events")) {
-                if (!alphaOk) {
+                return new Response("rate limited", { status: 403 });
+            }
+            if (url.includes("/repos/SegoCode/beta/events")) {
+                if (!betaOk) {
                     return new Response("rate limited", { status: 403 });
                 }
                 return Response.json([
                     {
                         type: "WatchEvent",
                         actor: {
-                            login: "one",
-                            avatar_url: "https://avatars.example/1",
+                            login: "beta-fan",
+                            avatar_url: "https://avatars.example/2",
                         },
-                        created_at: "2026-03-03T00:00:00Z",
+                        created_at: isoDaysAgo(2),
                     },
                 ]);
             }
@@ -289,40 +308,34 @@ describe("worker URL parameters", () => {
             return new Response(null, { status: 404 });
         });
 
-        const live = new Request("https://starcards.example/?width=640&borderColor=%232277FF");
-        const first = await worker.fetch(
-            live,
+        const partial = await worker.fetch(
+            new Request("https://starcards.example/?width=640"),
             undefined,
             {} as ExecutionContext,
         );
-        const firstSvg = await first.text();
-        expect(firstSvg).toContain(">one</text>");
-        expect(firstSvg).toMatch(/\.card \{[^}]*stroke: #2277ff;/);
-        expect(first.headers.get("cloudflare-cdn-cache-control")).toBe(
-            "max-age=3600",
-        );
+        expect(partial.status).toBe(200);
+        expect(partial.headers.get("cache-control")).toBe("no-store");
+        expect(partial.headers.get("cloudflare-cdn-cache-control")).toBeNull();
+        await expect(partial.text()).resolves.toContain(">beta-fan</text>");
 
-        alphaOk = false;
-        const second = await worker.fetch(
-            new Request("https://starcards.example/?width=640&borderColor=2277ff"),
+        betaOk = false;
+        const totalFailure = await worker.fetch(
+            new Request("https://starcards.example/?width=640"),
             undefined,
             {} as ExecutionContext,
         );
-        expect(second.headers.get("x-starcards-cache")).toBe("last-good");
-        await expect(second.text()).resolves.toBe(firstSvg);
-
-        const differentColor = await worker.fetch(
-            new Request("https://starcards.example/?width=640&borderColor=ff7722"),
-            undefined,
-            {} as ExecutionContext,
-        );
-        expect(differentColor.headers.get("x-starcards-cache")).toBeNull();
-        await expect(differentColor.text()).resolves.not.toContain(">one</text>");
+        expect(totalFailure.status).toBe(503);
+        expect(totalFailure.headers.get("cache-control")).toBe("no-store");
+        expect(totalFailure.headers.get("cloudflare-cdn-cache-control")).toBeNull();
     });
 });
 
 describe("recentStars", () => {
-    it("maps only usable star fields and returns the newest events", async () => {
+    it("maps only usable star fields, prunes stale repos, and returns the newest events", async () => {
+        const tAlpha = isoDaysAgo(2);
+        const tBeta = isoDaysAgo(1);
+        const tOld = isoDaysAgo(10);
+
         vi.stubGlobal("fetch", async (input: string | URL | Request) => {
             const url = input instanceof Request ? input.url : input.toString();
 
@@ -333,6 +346,7 @@ describe("recentStars", () => {
                         full_name: "SegoCode/alpha",
                         name: "alpha",
                         stargazers_count: 4,
+                        updated_at: tAlpha,
                         description: "discarded",
                     },
                     {
@@ -340,18 +354,28 @@ describe("recentStars", () => {
                         full_name: "SegoCode/beta",
                         name: "beta",
                         stargazers_count: 2,
+                        updated_at: tBeta,
                     },
                     {
                         fork: true,
                         full_name: "SegoCode/fork",
                         name: "fork",
                         stargazers_count: 9,
+                        updated_at: tBeta,
                     },
                     {
                         fork: false,
                         full_name: "SegoCode/empty",
                         name: "empty",
                         stargazers_count: 0,
+                        updated_at: tBeta,
+                    },
+                    {
+                        fork: false,
+                        full_name: "SegoCode/stale",
+                        name: "stale",
+                        stargazers_count: 100,
+                        updated_at: isoDaysAgo(60),
                     },
                 ]);
             }
@@ -364,7 +388,7 @@ describe("recentStars", () => {
                             login: "segocode",
                             avatar_url: "https://avatars.example/owner",
                         },
-                        created_at: "2026-05-01T00:00:00Z",
+                        created_at: isoDaysAgo(0),
                     },
                     {
                         type: "WatchEvent",
@@ -373,7 +397,7 @@ describe("recentStars", () => {
                             avatar_url: "https://avatars.example/alpha",
                             id: 10,
                         },
-                        created_at: "2026-02-01T00:00:00Z",
+                        created_at: tAlpha,
                         extra: "discarded",
                     },
                     {
@@ -382,7 +406,7 @@ describe("recentStars", () => {
                             login: "ignored",
                             avatar_url: "https://avatars.example/ignored",
                         },
-                        created_at: "2026-04-01T00:00:00Z",
+                        created_at: tBeta,
                     },
                 ]);
             }
@@ -395,7 +419,7 @@ describe("recentStars", () => {
                             login: "beta-user",
                             avatar_url: "https://avatars.example/beta",
                         },
-                        created_at: "2026-03-01T00:00:00Z",
+                        created_at: tBeta,
                     },
                     {
                         type: "WatchEvent",
@@ -403,7 +427,7 @@ describe("recentStars", () => {
                             login: "old-user",
                             avatar_url: "https://avatars.example/old",
                         },
-                        created_at: "2026-01-01T00:00:00Z",
+                        created_at: tOld,
                     },
                 ]);
             }
@@ -411,35 +435,36 @@ describe("recentStars", () => {
             throw new Error(`Unexpected request: ${url}`);
         });
 
-        const run = await recentStars(2);
+        const ownerSelfStarAt = new Date();
+        vi.useFakeTimers({ now: ownerSelfStarAt });
+        try {
+            const run = await recentStars(2);
 
-        expect(run.ok).toBe(true);
-        expect(run.ignored).toEqual({ forks: 1, noStars: 1, unparsed: 0 });
-        expect(run.droppedOwnerStars).toEqual([
-            {
-                login: "segocode",
-                avatarUrl: "https://avatars.example/owner",
-                repository: "alpha",
-                starredAt: "2026-05-01T00:00:00Z",
-            },
-        ]);
-        expect(run.stars).toEqual([
-            {
-                login: "beta-user",
-                avatarUrl: "https://avatars.example/beta",
-                repository: "beta",
-                starredAt: "2026-03-01T00:00:00Z",
-            },
-            {
-                login: "alpha-user",
-                avatarUrl: "https://avatars.example/alpha",
-                repository: "alpha",
-                starredAt: "2026-02-01T00:00:00Z",
-            },
-        ]);
+            expect(run.ok).toBe(true);
+            expect(run.ignored).toEqual({ forks: 1, noStars: 1, stale: 1, unparsed: 0 });
+            expect(run.droppedOwnerStars).toHaveLength(1);
+            expect(run.droppedOwnerStars[0]?.login).toBe("segocode");
+            expect(run.stars).toEqual([
+                {
+                    login: "beta-user",
+                    avatarUrl: "https://avatars.example/beta",
+                    repository: "beta",
+                    starredAt: tBeta,
+                },
+                {
+                    login: "alpha-user",
+                    avatarUrl: "https://avatars.example/alpha",
+                    repository: "alpha",
+                    starredAt: tAlpha,
+                },
+            ]);
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it("records a 4xx events fetch without dropping the other repos", async () => {
+        const tBeta = isoDaysAgo(1);
         vi.stubGlobal("fetch", async (input: string | URL | Request) => {
             const url = input instanceof Request ? input.url : input.toString();
 
@@ -450,12 +475,14 @@ describe("recentStars", () => {
                         full_name: "SegoCode/alpha",
                         name: "alpha",
                         stargazers_count: 4,
+                        updated_at: isoDaysAgo(1),
                     },
                     {
                         fork: false,
                         full_name: "SegoCode/beta",
                         name: "beta",
                         stargazers_count: 2,
+                        updated_at: tBeta,
                     },
                 ]);
             }
@@ -472,7 +499,7 @@ describe("recentStars", () => {
                             login: "beta-user",
                             avatar_url: "https://avatars.example/beta",
                         },
-                        created_at: "2026-03-01T00:00:00Z",
+                        created_at: tBeta,
                     },
                 ]);
             }
@@ -488,7 +515,7 @@ describe("recentStars", () => {
                 login: "beta-user",
                 avatarUrl: "https://avatars.example/beta",
                 repository: "beta",
-                starredAt: "2026-03-01T00:00:00Z",
+                starredAt: tBeta,
             },
         ]);
         expect(run.errors).toEqual([
@@ -500,7 +527,14 @@ describe("recentStars", () => {
         ]);
     });
 
-    it("fetches events only for the top repositories by star count", async () => {
+    it("captures recent stars on 1-star repos and stops early once older updated_at repos cannot beat the cutoff", async () => {
+        const requestedRepos: string[] = [];
+        const t1 = isoDaysAgo(1);
+        const t2 = isoDaysAgo(2);
+        const t3 = isoDaysAgo(3);
+        const t4 = isoDaysAgo(5);
+        const t5 = isoDaysAgo(8);
+
         vi.stubGlobal("fetch", async (input: string | URL | Request) => {
             const url = input instanceof Request ? input.url : input.toString();
 
@@ -508,100 +542,104 @@ describe("recentStars", () => {
                 return Response.json([
                     {
                         fork: false,
-                        full_name: "SegoCode/tiny",
-                        name: "tiny",
+                        full_name: "SegoCode/tiny-new",
+                        name: "tiny-new",
                         stargazers_count: 1,
+                        updated_at: t1,
                     },
                     {
                         fork: false,
-                        full_name: "SegoCode/hot",
-                        name: "hot",
-                        stargazers_count: 10,
+                        full_name: "SegoCode/pushed-only",
+                        name: "pushed-only",
+                        stargazers_count: 50,
+                        updated_at: t2,
                     },
                     {
                         fork: false,
-                        full_name: "SegoCode/mid",
-                        name: "mid",
-                        stargazers_count: 8,
+                        full_name: "SegoCode/flagship",
+                        name: "flagship",
+                        stargazers_count: 800,
+                        updated_at: t3,
                     },
                     {
                         fork: false,
-                        full_name: "SegoCode/low",
-                        name: "low",
-                        stargazers_count: 5,
+                        full_name: "SegoCode/older-active",
+                        name: "older-active",
+                        stargazers_count: 200,
+                        updated_at: t4,
+                    },
+                    {
+                        fork: false,
+                        full_name: "SegoCode/never-touched",
+                        name: "never-touched",
+                        stargazers_count: 900,
+                        updated_at: t5,
                     },
                 ]);
             }
 
-            if (url.includes("/repos/SegoCode/hot/events")) {
+            const match = /\/repos\/SegoCode\/([^/]+)\/events/.exec(url);
+            if (match?.[1]) {
+                requestedRepos.push(match[1]);
+            }
+
+            if (url.includes("/repos/SegoCode/tiny-new/events")) {
                 return Response.json([
                     {
                         type: "WatchEvent",
-                        actor: {
-                            login: "hot-user",
-                            avatar_url: "https://avatars.example/hot",
-                        },
-                        created_at: "2026-01-01T00:00:00Z",
+                        actor: { login: "tiny-fan", avatar_url: "https://avatars.example/1" },
+                        created_at: t1,
                     },
                 ]);
             }
 
-            if (url.includes("/repos/SegoCode/mid/events")) {
+            if (url.includes("/repos/SegoCode/pushed-only/events")) {
+                // Only PushEvent, no WatchEvent -> forces scanner to check next batch if needed
+                return Response.json([
+                    {
+                        type: "PushEvent",
+                        actor: { login: "someone", avatar_url: "https://avatars.example/p" },
+                        created_at: t2,
+                    },
+                ]);
+            }
+
+            if (url.includes("/repos/SegoCode/flagship/events")) {
                 return Response.json([
                     {
                         type: "WatchEvent",
-                        actor: {
-                            login: "mid-user",
-                            avatar_url: "https://avatars.example/mid",
-                        },
-                        created_at: "2026-02-01T00:00:00Z",
+                        actor: { login: "flag-fan-1", avatar_url: "https://avatars.example/2" },
+                        created_at: t3,
                     },
-                ]);
-            }
-
-            if (url.includes("/repos/SegoCode/low/events")) {
-                return Response.json([
                     {
                         type: "WatchEvent",
-                        actor: {
-                            login: "low-user",
-                            avatar_url: "https://avatars.example/low",
-                        },
-                        created_at: "2026-03-01T00:00:00Z",
+                        actor: { login: "flag-fan-2", avatar_url: "https://avatars.example/3" },
+                        created_at: isoDaysAgo(4),
                     },
                 ]);
             }
 
-            throw new Error(`Unexpected request: ${url}`);
+            throw new Error(`Should have stopped early before fetching: ${url}`);
         });
 
-        const run = await recentStars(2);
+        const run = await recentStars(3);
 
-        expect(run.repositories.map(repository => repository.name)).toEqual([
-            "hot",
-            "mid",
-            "low",
-        ]);
-        expect(run.stars).toEqual([
-            {
-                login: "low-user",
-                avatarUrl: "https://avatars.example/low",
-                repository: "low",
-                starredAt: "2026-03-01T00:00:00Z",
-            },
-            {
-                login: "mid-user",
-                avatarUrl: "https://avatars.example/mid",
-                repository: "mid",
-                starredAt: "2026-02-01T00:00:00Z",
-            },
+        expect(requestedRepos).toEqual(["tiny-new", "pushed-only", "flagship"]);
+        expect(run.stars.map(s => `${s.repository}:${s.login}`)).toEqual([
+            "tiny-new:tiny-fan",
+            "flagship:flag-fan-1",
+            "flagship:flag-fan-2",
         ]);
     });
 });
 
 describe("renderStars", () => {
-    it("renders a light SVG and escapes GitHub text", async () => {
-        vi.stubGlobal("fetch", async () => new Response(null, { status: 404 }));
+    it("requests resized s=80 avatars, renders a light SVG, and escapes GitHub text", async () => {
+        const avatarUrls: string[] = [];
+        vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+            avatarUrls.push(input instanceof Request ? input.url : input.toString());
+            return new Response(null, { status: 404 });
+        });
 
         const svg = await renderStars(
             [
@@ -615,6 +653,7 @@ describe("renderStars", () => {
             640,
         );
 
+        expect(avatarUrls).toEqual(["https://avatars.example/user?s=80"]);
         expect(svg).toContain('height="63"');
         expect(svg).toContain('width="640"');
         expect(svg).toContain("name&lt;&amp;&gt;&quot;");
