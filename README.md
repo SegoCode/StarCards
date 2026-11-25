@@ -61,7 +61,7 @@ https://starcards.<subdomain>.workers.dev/?width=640
 ```
 https://starcards.<subdomain>.workers.dev/?width=640&cards=5
 ```
-- *`cards` (optional). How many star rows to draw. Must be a positive integer. Omit it and the worker draws 3. Invalid values return HTTP 400 with `cards must be a positive integer`.*
+- *`cards` (optional). How many star rows to draw, between `1` and `10`. Omit it and the worker draws 3. Invalid values return HTTP 400 with `cards must be an integer between 1 and 10`.*
 
 ```
 https://starcards.<subdomain>.workers.dev/?width=640&layout=feed
