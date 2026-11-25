@@ -631,6 +631,55 @@ describe("recentStars", () => {
             "flagship:flag-fan-2",
         ]);
     });
+
+    it("scans only the top updated repo when it already proves the newest N stars, cutting API calls in half", async () => {
+        const requestedRepos: string[] = [];
+        vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+            const url = input instanceof Request ? input.url : input.toString();
+            if (url.includes("/users/SegoCode/repos")) {
+                return Response.json([
+                    {
+                        fork: false,
+                        full_name: "SegoCode/AutoWall",
+                        name: "AutoWall",
+                        stargazers_count: 772,
+                        updated_at: isoDaysAgo(1),
+                    },
+                    {
+                        fork: false,
+                        full_name: "SegoCode/SegoCode",
+                        name: "SegoCode",
+                        stargazers_count: 2,
+                        updated_at: isoDaysAgo(20),
+                    },
+                    {
+                        fork: false,
+                        full_name: "SegoCode/TailscaleActions",
+                        name: "TailscaleActions",
+                        stargazers_count: 1,
+                        updated_at: isoDaysAgo(25),
+                    },
+                ]);
+            }
+            const match = /\/repos\/SegoCode\/([^/]+)\/events/.exec(url);
+            if (match?.[1]) {
+                requestedRepos.push(match[1]);
+            }
+            if (url.includes("/repos/SegoCode/AutoWall/events")) {
+                return Response.json([
+                    { type: "WatchEvent", actor: { login: "a", avatar_url: "https://avatars.example/a" }, created_at: isoDaysAgo(1) },
+                    { type: "WatchEvent", actor: { login: "b", avatar_url: "https://avatars.example/b" }, created_at: isoDaysAgo(5) },
+                    { type: "WatchEvent", actor: { login: "c", avatar_url: "https://avatars.example/c" }, created_at: isoDaysAgo(8) },
+                ]);
+            }
+            throw new Error(`Should not have requested secondary repo: ${url}`);
+        });
+
+        const run = await recentStars(3);
+        expect(run.ok).toBe(true);
+        expect(requestedRepos).toEqual(["AutoWall"]);
+        expect(run.stars.map(s => s.login)).toEqual(["a", "b", "c"]);
+    });
 });
 
 describe("renderStars", () => {
